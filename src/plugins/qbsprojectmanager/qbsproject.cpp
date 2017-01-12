@@ -72,6 +72,8 @@
 #include <QMessageBox>
 #include <QVariantMap>
 
+#include <algorithm>
+
 using namespace Core;
 using namespace ProjectExplorer;
 using namespace Utils;
@@ -91,7 +93,6 @@ static const char CONFIG_INCLUDEPATHS[] = "includePaths";
 static const char CONFIG_SYSTEM_INCLUDEPATHS[] = "systemIncludePaths";
 static const char CONFIG_FRAMEWORKPATHS[] = "frameworkPaths";
 static const char CONFIG_SYSTEM_FRAMEWORKPATHS[] = "systemFrameworkPaths";
-static const char CONFIG_PRECOMPILEDHEADER[] = "precompiledHeader";
 
 // --------------------------------------------------------------------
 // QbsProject:
@@ -252,7 +253,7 @@ bool QbsProject::ensureWriteableQbsFile(const QString &file)
             bool makeWritable = QFile::setPermissions(file, fi.permissions() | QFile::WriteUser);
             if (!makeWritable) {
                 QMessageBox::warning(ICore::mainWindow(),
-                                     tr("Failed!"),
+                                     tr("Failed"),
                                      tr("Could not write project file %1.").arg(file));
                 return false;
             }
@@ -494,22 +495,6 @@ void QbsProject::handleQbsParsingDone(bool success)
         m_qbsUpdateFutureInterface->reportCanceled();
     }
 
-    bool hasTargetArtifacts = false;
-    if (dataChanged) {
-        qCDebug(qbsPmLog) << "Project data changed.";
-        foreach (const qbs::ProductData &product, m_projectData.allProducts()) {
-            if (!product.targetArtifacts().isEmpty()) {
-                hasTargetArtifacts = true;
-                break;
-            }
-        }
-        if (!hasTargetArtifacts) {
-            qCDebug(qbsPmLog) << "No target artifacts present, executing rules";
-            m_qbsProjectParser->startRuleExecution();
-            return;
-        }
-    }
-
     m_qbsProjectParser->deleteLater();
     m_qbsProjectParser = 0;
     m_qbsUpdateFutureInterface->reportFinished();
@@ -519,6 +504,7 @@ void QbsProject::handleQbsParsingDone(bool success)
     if (dataChanged)
         updateAfterParse();
     emit projectParsingDone(success);
+    emit parsingFinished();
 }
 
 void QbsProject::handleRuleExecutionDone()
@@ -638,7 +624,12 @@ void QbsProject::cancelParsing()
 void QbsProject::updateAfterBuild()
 {
     QTC_ASSERT(m_qbsProject.isValid(), return);
-    m_projectData = m_qbsProject.projectData();
+    const qbs::ProjectData &projectData = m_qbsProject.projectData();
+    if (projectData == m_projectData)
+        return;
+    qCDebug(qbsPmLog) << "Updating data after build";
+    m_projectData = projectData;
+    rootProjectNode()->update();
     updateBuildTargetData();
     updateCppCompilerCallData();
     if (m_extraCompilersPending) {
@@ -784,6 +775,89 @@ static QString groupLocationToProjectFile(const qbs::CodeLocation &location)
                         .arg(location.column());
 }
 
+// TODO: Receive the values from qbs when QBS-1030 is resolved.
+static void getExpandedCompilerFlags(QStringList &cFlags, QStringList &cxxFlags,
+                                     const qbs::PropertyMap &properties)
+{
+    const auto getCppProp = [properties](const char *propertyName) {
+        return properties.getModuleProperty("cpp", QLatin1String(propertyName));
+    };
+    const QVariant &enableExceptions = getCppProp("enableExceptions");
+    const QVariant &enableRtti = getCppProp("enableRtti");
+    QStringList commonFlags = getCppProp("platformCommonCompilerFlags").toStringList();
+    commonFlags << getCppProp("commonCompilerFlags").toStringList()
+                << getCppProp("platformDriverFlags").toStringList()
+                << getCppProp("driverFlags").toStringList();
+    const QStringList toolchain = properties.getModulePropertiesAsStringList("qbs", "toolchain");
+    if (toolchain.contains("gcc")) {
+        bool hasTargetOption = false;
+        if (toolchain.contains("clang")) {
+            const int majorVersion = getCppProp("compilerVersionMajor").toInt();
+            const int minorVersion = getCppProp("compilerVersionMinor").toInt();
+            if (majorVersion > 3 || (majorVersion == 3 && minorVersion >= 1))
+                hasTargetOption = true;
+        }
+        if (hasTargetOption) {
+            commonFlags << "-target" << getCppProp("target").toString();
+        } else {
+            const QString targetArch = getCppProp("targetArch").toString();
+            if (targetArch == "x86_64")
+                commonFlags << "-m64";
+            else if (targetArch == "i386")
+                commonFlags << "-m32";
+            const QString machineType = getCppProp("machineType").toString();
+            if (!machineType.isEmpty())
+                commonFlags << ("-march=" + machineType);
+        }
+        const QStringList targetOS = properties.getModulePropertiesAsStringList(
+                    "qbs", "targetOS");
+        if (targetOS.contains("unix")) {
+            const QVariant positionIndependentCode = getCppProp("positionIndependentCode");
+            if (!positionIndependentCode.isValid() || positionIndependentCode.toBool())
+                commonFlags << "-fPIC";
+        }
+        cFlags = cxxFlags = commonFlags;
+
+        const QString cxxLanguageVersion = getCppProp("cxxLanguageVersion").toString();
+        if (cxxLanguageVersion == "c++11")
+            cxxFlags << "-std=c++0x";
+        else if (cxxLanguageVersion == "c++14")
+            cxxFlags << "-std=c++1y";
+        else if (!cxxLanguageVersion.isEmpty())
+            cxxFlags << ("-std=" + cxxLanguageVersion);
+        const QString cxxStandardLibrary = getCppProp("cxxStandardLibrary").toString();
+        if (!cxxStandardLibrary.isEmpty() && toolchain.contains("clang"))
+            cxxFlags << ("-stdlib=" + cxxStandardLibrary);
+        if (enableExceptions.isValid()) {
+            cxxFlags << QLatin1String(enableExceptions.toBool()
+                                      ? "-fexceptions" : "-fno-exceptions");
+        }
+        if (enableRtti.isValid())
+            cxxFlags << QLatin1String(enableRtti.toBool() ? "-frtti" : "-fno-rtti");
+
+        const QString cLanguageVersion = getCppProp("cLanguageVersion").toString();
+        if (cLanguageVersion == "c11")
+            cFlags << "-std=c1x";
+        else if (!cLanguageVersion.isEmpty())
+            cFlags << ("-std=" + cLanguageVersion);
+    } else if (toolchain.contains("msvc")) {
+        if (enableExceptions.toBool()) {
+            const QString exceptionModel = getCppProp("exceptionHandlingModel").toString();
+            if (exceptionModel == "default")
+                commonFlags << "/EHsc";
+            else if (exceptionModel == "seh")
+                commonFlags << "/EHa";
+            else if (exceptionModel == "externc")
+                commonFlags << "/EHs";
+        }
+        cFlags = cxxFlags = commonFlags;
+        cFlags << "/TC";
+        cxxFlags << "/TP";
+        if (enableRtti.isValid())
+            cxxFlags << QLatin1String(enableRtti.toBool() ? "/GR" : "/GR-");
+    }
+}
+
 void QbsProject::updateCppCodeModel()
 {
     if (!m_projectData.isValid())
@@ -813,15 +887,35 @@ void QbsProject::updateCppCodeModel()
     qDeleteAll(m_extraCompilers);
     m_extraCompilers.clear();
     foreach (const qbs::ProductData &prd, m_projectData.allProducts()) {
+        QString cPch;
+        QString cxxPch;
+        QString objcPch;
+        QString objcxxPch;
+        const auto &pchFinder = [&cPch, &cxxPch, &objcPch, &objcxxPch](const qbs::ArtifactData &a) {
+            if (a.fileTags().contains("c_pch_src"))
+                cPch = a.filePath();
+            else if (a.fileTags().contains("cpp_pch_src"))
+                cxxPch = a.filePath();
+            else if (a.fileTags().contains("objc_pch_src"))
+                objcPch = a.filePath();
+            else if (a.fileTags().contains("objcpp_pch_src"))
+                objcxxPch = a.filePath();
+        };
+        const QList<qbs::ArtifactData> &generatedArtifacts = prd.generatedArtifacts();
+        std::for_each(generatedArtifacts.cbegin(), generatedArtifacts.cend(), pchFinder);
+        foreach (const qbs::GroupData &grp, prd.groups()) {
+            const QList<qbs::ArtifactData> &sourceArtifacts = grp.allSourceArtifacts();
+            std::for_each(sourceArtifacts.cbegin(), sourceArtifacts.cend(), pchFinder);
+        }
+
         foreach (const qbs::GroupData &grp, prd.groups()) {
             const qbs::PropertyMap &props = grp.properties();
 
-            ppBuilder.setCxxFlags(props.getModulePropertiesAsStringList(
-                                      QLatin1String(CONFIG_CPP_MODULE),
-                                      QLatin1String(CONFIG_CXXFLAGS)));
-            ppBuilder.setCFlags(props.getModulePropertiesAsStringList(
-                                    QLatin1String(CONFIG_CPP_MODULE),
-                                    QLatin1String(CONFIG_CFLAGS)));
+            QStringList cFlags;
+            QStringList cxxFlags;
+            getExpandedCompilerFlags(cFlags, cxxFlags, props);
+            ppBuilder.setCxxFlags(cxxFlags);
+            ppBuilder.setCFlags(cFlags);
 
             QStringList list = props.getModulePropertiesAsStringList(
                         QLatin1String(CONFIG_CPP_MODULE),
@@ -859,18 +953,26 @@ void QbsProject::updateCppCodeModel()
 
             ppBuilder.setHeaderPaths(grpHeaderPaths);
 
-            const QString pch = props.getModuleProperty(QLatin1String(CONFIG_CPP_MODULE),
-                    QLatin1String(CONFIG_PRECOMPILEDHEADER)).toString();
-            ppBuilder.setPreCompiledHeaders(QStringList() << pch);
-
             ppBuilder.setDisplayName(grp.name());
             ppBuilder.setProjectFile(groupLocationToProjectFile(grp.location()));
 
             QHash<QString, qbs::ArtifactData> filePathToSourceArtifact;
+            bool hasCFiles = false;
+            bool hasCxxFiles = false;
+            bool hasObjcFiles = false;
+            bool hasObjcxxFiles = false;
             foreach (const qbs::ArtifactData &source, grp.allSourceArtifacts()) {
                 filePathToSourceArtifact.insert(source.filePath(), source);
 
                 foreach (const QString &tag, source.fileTags()) {
+                    if (tag == "c")
+                        hasCFiles = true;
+                    else if (tag == "cpp")
+                        hasCxxFiles = true;
+                    else if (tag == "objc")
+                        hasObjcFiles = true;
+                    else if (tag == "objcpp")
+                        hasObjcxxFiles = true;
                     for (auto i = factoriesBegin; i != factoriesEnd; ++i) {
                         if ((*i)->sourceTag() != tag)
                             continue;
@@ -891,6 +993,31 @@ void QbsProject::updateCppCodeModel()
                     }
                 }
             }
+
+            QStringList pchFiles;
+            if (hasCFiles && props.getModuleProperty("cpp", "useCPrecompiledHeader").toBool()
+                    && !cPch.isEmpty()) {
+                pchFiles << cPch;
+            }
+            if (hasCxxFiles && props.getModuleProperty("cpp", "useCxxPrecompiledHeader").toBool()
+                    && !cxxPch.isEmpty()) {
+                pchFiles << cxxPch;
+            }
+            if (hasObjcFiles && props.getModuleProperty("cpp", "useObjcPrecompiledHeader").toBool()
+                    && !objcPch.isEmpty()) {
+                pchFiles << objcPch;
+            }
+            if (hasObjcxxFiles
+                    && props.getModuleProperty("cpp", "useObjcxxPrecompiledHeader").toBool()
+                    && !objcxxPch.isEmpty()) {
+                pchFiles << objcxxPch;
+            }
+            if (pchFiles.count() > 1) {
+                qCWarning(qbsPmLog) << "More than one pch file enabled for source files in group"
+                                    << grp.name() << "in product" << prd.name();
+                qCWarning(qbsPmLog) << "Expect problems with code model";
+            }
+            ppBuilder.setPreCompiledHeaders(pchFiles);
 
             const QList<Id> languages = ppBuilder.createProjectPartsForFiles(
                 grp.allFilePaths(),
@@ -1009,8 +1136,6 @@ void QbsProject::updateDeploymentInfo()
 {
     DeploymentData deploymentData;
     if (m_qbsProject.isValid()) {
-        qbs::InstallOptions installOptions;
-        installOptions.setInstallRoot(QLatin1String("/"));
         foreach (const qbs::ArtifactData &f, m_projectData.installableArtifacts()) {
             deploymentData.addFile(f.filePath(), f.installData().installDir(),
                     f.isExecutable() ? DeployableFile::TypeExecutable : DeployableFile::TypeNormal);

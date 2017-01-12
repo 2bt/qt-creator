@@ -29,7 +29,6 @@
 #include "clangstaticanalyzertool.h"
 #include "clangstaticanalyzerutils.h"
 
-#include <cpptools/cppmodelmanager.h>
 #include <cpptools/projectinfo.h>
 #include <projectexplorer/kitinformation.h>
 #include <projectexplorer/kitmanager.h>
@@ -44,6 +43,7 @@
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
+#include <QVariant>
 
 #include <functional>
 
@@ -66,6 +66,35 @@ static bool processEventsUntil(const std::function<bool()> condition, int timeOu
     }
 }
 
+class WaitForParsedProjects : public QObject
+{
+public:
+    WaitForParsedProjects(ProjectExplorer::SessionManager &sessionManager,
+                          const QStringList &projects)
+        : m_sessionManager(sessionManager)
+        , m_projectsToWaitFor(projects)
+    {
+        connect(&m_sessionManager, &ProjectExplorer::SessionManager::projectFinishedParsing,
+                this, &WaitForParsedProjects::onProjectFinishedParsing);
+    }
+
+    void onProjectFinishedParsing(ProjectExplorer::Project *project)
+    {
+        m_projectsToWaitFor.removeOne(project->projectFilePath().toString());
+    }
+
+    bool wait()
+    {
+        return processEventsUntil([this]() {
+            return m_projectsToWaitFor.isEmpty();
+        });
+    }
+
+private:
+    ProjectExplorer::SessionManager &m_sessionManager;
+    QStringList m_projectsToWaitFor;
+};
+
 namespace ClangStaticAnalyzer {
 namespace Internal {
 
@@ -84,16 +113,14 @@ void ClangStaticAnalyzerPreconfiguredSessionTests::initTestCase()
     if (!m_sessionManager.sessions().contains(preconfiguredSessionName))
         QSKIP("Manually preconfigured session 'ClangStaticAnalyzerPreconfiguredSession' needed.");
 
-    // Load session
-    if (m_sessionManager.activeSession() != preconfiguredSessionName)
-        QVERIFY(m_sessionManager.loadSession(preconfiguredSessionName));
+    if (m_sessionManager.activeSession() == preconfiguredSessionName)
+        QSKIP("Session must not be already active.");
 
-    // Wait until all projects are loaded.
-    const int sessionManagerProjects = m_sessionManager.projects().size();
-    const auto allProjectsLoaded = [sessionManagerProjects]() {
-        return CppModelManager::instance()->projectInfos().size() == sessionManagerProjects;
-    };
-    QVERIFY(processEventsUntil(allProjectsLoaded));
+    // Load session
+    const QStringList projects = m_sessionManager.projectsForSessionName(preconfiguredSessionName);
+    WaitForParsedProjects waitForParsedProjects(m_sessionManager, projects);
+    QVERIFY(m_sessionManager.loadSession(preconfiguredSessionName));
+    QVERIFY(waitForParsedProjects.wait());
 }
 
 void ClangStaticAnalyzerPreconfiguredSessionTests::testPreconfiguredSession()
@@ -107,7 +134,8 @@ void ClangStaticAnalyzerPreconfiguredSessionTests::testPreconfiguredSession()
     QSignalSpy waitUntilAnalyzerFinished(&m_analyzerTool, SIGNAL(finished(bool)));
     QVERIFY(waitUntilAnalyzerFinished.wait(30000));
     const QList<QVariant> arguments = waitUntilAnalyzerFinished.takeFirst();
-    QVERIFY(arguments.first().toBool());
+    const bool analyzerFinishedSuccessfully = arguments.first().toBool();
+    QVERIFY(analyzerFinishedSuccessfully);
     QCOMPARE(m_analyzerTool.diagnostics().count(), 0);
 }
 
@@ -196,15 +224,19 @@ bool ClangStaticAnalyzerPreconfiguredSessionTests::switchToProjectAndTarget(Proj
     if (project == activeProject && target == activeProject->activeTarget())
         return true; // OK, desired project/target already active.
 
-    QSignalSpy waitUntilProjectUpdated(CppModelManager::instance(),
-                                       &CppModelManager::projectPartsUpdated);
+    if (project != activeProject)
+        m_sessionManager.setStartupProject(project);
 
-    m_sessionManager.setActiveTarget(project, target, ProjectExplorer::SetActive::Cascade);
+    if (target != project->activeTarget()) {
+        QSignalSpy spyFinishedParsing(ProjectExplorer::SessionManager::instance(),
+                                      &ProjectExplorer::SessionManager::projectFinishedParsing);
+        m_sessionManager.setActiveTarget(project, target, ProjectExplorer::SetActive::NoCascade);
+        QTC_ASSERT(spyFinishedParsing.wait(30000), return false);
 
-    const bool waitResult = waitUntilProjectUpdated.wait(30000);
-    if (!waitResult) {
-        qWarning() << "waitUntilProjectUpdated() failed";
-        return false;
+        const QVariant projectArgument = spyFinishedParsing.takeFirst().takeFirst();
+        QTC_ASSERT(projectArgument.canConvert<ProjectExplorer::Project *>(), return false);
+
+        return projectArgument.value<ProjectExplorer::Project *>() == project;
     }
 
     return true;

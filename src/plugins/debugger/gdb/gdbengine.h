@@ -154,6 +154,8 @@ private: ////////// Gdb Command Management //////////
         NeedsStop = 1,
         // No need to wait for the reply before continuing inferior.
         Discardable = 2,
+        // Needs a dummy extra command to force GDB output flushing.
+        NeedsFlush = 4,
         // Callback expects ResultRunning instead of ResultDone.
         RunRequest = 16,
         // Callback expects ResultExit instead of ResultDone.
@@ -360,9 +362,8 @@ protected:
     void handleThreadNames(const DebuggerResponse &response);
     DebuggerCommand stackCommand(int depth);
     void reloadStack();
-    virtual void reloadFullStack() override;
-    virtual void loadAdditionalQmlStack() override;
-    void handleQmlStackTrace(const DebuggerResponse &response);
+    void reloadFullStack() override;
+    void loadAdditionalQmlStack() override;
     int currentFrame() const;
 
     //

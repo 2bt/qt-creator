@@ -130,7 +130,7 @@ public:
     virtual void configureAsExampleProject(const QSet<Core::Id> &platforms);
 
     virtual bool requiresTargetPanel() const;
-    virtual ProjectImporter *createProjectImporter() const;
+    virtual ProjectImporter *projectImporter() const;
 
     KitMatcher requiredKitMatcher() const;
     void setRequiredKitMatcher(const KitMatcher &matcher);
@@ -167,6 +167,9 @@ signals:
 
     void projectContextUpdated();
     void projectLanguagesUpdated();
+
+signals: // for tests only
+    void parsingFinished();
 
 protected:
     virtual RestoreResult fromMap(const QVariantMap &map, QString *errorMessage);

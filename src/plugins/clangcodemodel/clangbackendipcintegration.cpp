@@ -32,6 +32,7 @@
 
 #include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/icore.h>
+#include <coreplugin/messagemanager.h>
 
 #include <cpptools/abstracteditorsupport.h>
 #include <cpptools/baseeditordocumentprocessor.h>
@@ -68,6 +69,8 @@
 
 #include <cplusplus/Icons.h>
 
+#include <QDateTime>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QProcess>
@@ -80,18 +83,32 @@ using namespace ClangCodeModel::Internal;
 using namespace ClangBackEnd;
 using namespace TextEditor;
 
-namespace {
-
-QString backendProcessPath()
+static QString backendProcessPath()
 {
     return Core::ICore::libexecPath()
             + QStringLiteral("/clangbackend")
             + QStringLiteral(QTC_HOST_EXE_SUFFIX);
 }
 
-} // anonymous namespace
+static bool printAliveMessageHelper()
+{
+    const bool print = qEnvironmentVariableIntValue("QTC_CLANG_FORCE_VERBOSE_ALIVE");
+    if (!print) {
+        qCDebug(log) << "Hint: AliveMessage will not be printed. "
+                        "Force it by setting QTC_CLANG_FORCE_VERBOSE_ALIVE=1.";
+    }
+
+    return print;
+}
+
+static bool printAliveMessage()
+{
+    static bool print = log().isDebugEnabled() ? printAliveMessageHelper() : false;
+    return print;
+}
 
 IpcReceiver::IpcReceiver()
+    : m_printAliveMessage(printAliveMessage())
 {
 }
 
@@ -140,7 +157,8 @@ bool IpcReceiver::isExpectingCodeCompletedMessage() const
 
 void IpcReceiver::alive()
 {
-    qCDebug(log) << "<<< AliveMessage";
+    if (m_printAliveMessage)
+        qCDebug(log) << "<<< AliveMessage";
     QTC_ASSERT(m_aliveHandler, return);
     m_aliveHandler();
 }
@@ -180,7 +198,9 @@ void IpcReceiver::documentAnnotationsChanged(const DocumentAnnotationsChangedMes
         const QString documentProjectPartId = CppTools::CppToolsBridge::projectPartIdForFile(filePath);
         if (projectPartId == documentProjectPartId) {
             const quint32 documentRevision = message.fileContainer().documentRevision();
-            processor->updateCodeWarnings(message.diagnostics(), documentRevision);
+            processor->updateCodeWarnings(message.diagnostics(),
+                                          message.firstHeaderErrorDiagnostic(),
+                                          documentRevision);
             processor->updateHighlighting(message.highlightingMarks(),
                                           message.skippedPreprocessorRanges(),
                                           documentRevision);
@@ -304,33 +324,50 @@ public:
     void updateVisibleTranslationUnits(const UpdateVisibleTranslationUnitsMessage &) override {}
 };
 
+enum { backEndStartTimeOutInMs = 10000 };
+
 IpcCommunicator::IpcCommunicator()
     : m_connection(&m_ipcReceiver)
     , m_ipcSender(new DummyIpcSender)
 {
+    m_backendStartTimeOut.setSingleShot(true);
+    connect(&m_backendStartTimeOut, &QTimer::timeout,
+            this, &IpcCommunicator::logStartTimeOut);
+
     m_ipcReceiver.setAliveHandler([this]() { m_connection.resetProcessAliveTimer(); });
 
     connect(Core::EditorManager::instance(), &Core::EditorManager::editorAboutToClose,
             this, &IpcCommunicator::onEditorAboutToClose);
     connect(Core::ICore::instance(), &Core::ICore::coreAboutToClose,
-            this, &IpcCommunicator::onCoreAboutToClose);
+            this, &IpcCommunicator::setupDummySender);
 
     initializeBackend();
+}
+
+IpcCommunicator::~IpcCommunicator()
+{
+    disconnect(&m_connection, 0, this, 0);
 }
 
 void IpcCommunicator::initializeBackend()
 {
     const QString clangBackEndProcessPath = backendProcessPath();
+    if (!QFileInfo(clangBackEndProcessPath).exists()) {
+        logExecutableDoesNotExist();
+        return;
+    }
     qCDebug(log) << "Starting" << clangBackEndProcessPath;
-    QTC_ASSERT(QFileInfo(clangBackEndProcessPath).exists(), return);
 
     m_connection.setProcessAliveTimerInterval(30 * 1000);
     m_connection.setProcessPath(clangBackEndProcessPath);
 
     connect(&m_connection, &ConnectionClient::connectedToLocalSocket,
             this, &IpcCommunicator::onConnectedToBackend);
+    connect(&m_connection, &ConnectionClient::disconnectedFromLocalSocket,
+            this, &IpcCommunicator::setupDummySender);
 
     m_connection.startProcessAndConnectToServerAsynchronously();
+    m_backendStartTimeOut.start(backEndStartTimeOutInMs);
 }
 
 static QStringList projectPartOptions(const CppTools::ProjectPart::Ptr &projectPart)
@@ -483,8 +520,11 @@ void IpcCommunicator::registerCurrentCodeModelUiHeaders()
     using namespace CppTools;
 
     const auto editorSupports = CppModelManager::instance()->abstractEditorSupports();
-    foreach (const AbstractEditorSupport *es, editorSupports)
-        updateUnsavedFile(es->fileName(), es->contents(), es->revision());
+    foreach (const AbstractEditorSupport *es, editorSupports) {
+        const QString mappedPath
+                = ModelManagerSupportClang::instance()->dummyUiHeaderOnDiskPath(es->fileName());
+        updateUnsavedFile(mappedPath, es->contents(), es->revision());
+    }
 }
 
 void IpcCommunicator::registerProjectsParts(const QList<CppTools::ProjectPart::Ptr> projectParts)
@@ -495,43 +535,21 @@ void IpcCommunicator::registerProjectsParts(const QList<CppTools::ProjectPart::P
 
 void IpcCommunicator::updateTranslationUnitFromCppEditorDocument(const QString &filePath)
 {
-    const auto document = CppTools::CppModelManager::instance()->cppEditorDocument(filePath);
+    const CppTools::CppEditorDocumentHandle *document = ClangCodeModel::Utils::cppDocument(filePath);
 
     updateTranslationUnit(filePath, document->contents(), document->revision());
 }
 
 void IpcCommunicator::updateUnsavedFileFromCppEditorDocument(const QString &filePath)
 {
-    const auto document = CppTools::CppModelManager::instance()->cppEditorDocument(filePath);
+    const CppTools::CppEditorDocumentHandle *document = ClangCodeModel::Utils::cppDocument(filePath);
 
     updateUnsavedFile(filePath, document->contents(), document->revision());
 }
 
 namespace {
-CppTools::CppEditorDocumentHandle *cppDocument(const QString &filePath)
-{
-    return CppTools::CppModelManager::instance()->cppEditorDocument(filePath);
-}
 
-bool documentHasChanged(const QString &filePath,
-                        uint revision)
-{
-    auto *document = cppDocument(filePath);
 
-    if (document)
-        return document->sendTracker().shouldSendRevision(revision);
-
-    return true;
-}
-
-void setLastSentDocumentRevision(const QString &filePath,
-                                 uint revision)
-{
-    auto *document = cppDocument(filePath);
-
-    if (document)
-        document->sendTracker().setLastSentRevision(int(revision));
-}
 }
 
 void IpcCommunicator::updateTranslationUnit(const QString &filePath,
@@ -557,6 +575,20 @@ void IpcCommunicator::updateUnsavedFile(const QString &filePath, const QByteArra
                                     Utf8String::fromByteArray(contents),
                                     hasUnsavedContent,
                                     documentRevision}});
+}
+
+static bool documentHasChanged(const QString &filePath, uint revision)
+{
+    if (CppTools::CppEditorDocumentHandle *document = ClangCodeModel::Utils::cppDocument(filePath))
+        return document->sendTracker().shouldSendRevision(revision);
+
+    return true;
+}
+
+static void setLastSentDocumentRevision(const QString &filePath, uint revision)
+{
+    if (CppTools::CppEditorDocumentHandle *document = ClangCodeModel::Utils::cppDocument(filePath))
+        document->sendTracker().setLastSentRevision(int(revision));
 }
 
 void IpcCommunicator::updateTranslationUnitWithRevisionCheck(const FileContainer &fileContainer)
@@ -588,9 +620,7 @@ void IpcCommunicator::updateTranslationUnitWithRevisionCheck(Core::IDocument *do
 
 void IpcCommunicator::updateChangeContentStartPosition(const QString &filePath, int position)
 {
-    auto *document = cppDocument(filePath);
-
-    if (document)
+    if (CppTools::CppEditorDocumentHandle *document = ClangCodeModel::Utils::cppDocument(filePath))
         document->sendTracker().applyContentChange(position);
 }
 
@@ -615,11 +645,11 @@ void IpcCommunicator::updateUnsavedFile(Core::IDocument *document)
 
 void IpcCommunicator::onConnectedToBackend()
 {
+    m_backendStartTimeOut.stop();
+
     ++m_connectedCount;
-    if (m_connectedCount > 1) {
-        qWarning("Clang back end finished unexpectedly, restarted.");
-        qCDebug(log) << "Backend restarted, re-initializing with project data and unsaved files.";
-    }
+    if (m_connectedCount > 1)
+        logRestartedDueToUnexpectedFinish();
 
     m_ipcReceiver.deleteAndClearWaitingAssistProcessors();
     m_ipcSender.reset(new IpcSender(m_connection));
@@ -633,9 +663,47 @@ void IpcCommunicator::onEditorAboutToClose(Core::IEditor *editor)
         m_ipcReceiver.deleteProcessorsOfEditorWidget(textEditor->editorWidget());
 }
 
-void IpcCommunicator::onCoreAboutToClose()
+void IpcCommunicator::setupDummySender()
 {
     m_ipcSender.reset(new DummyIpcSender);
+}
+
+void IpcCommunicator::logExecutableDoesNotExist()
+{
+    const QString msg
+        = tr("Clang Code Model: Error: "
+             "The clangbackend executable \"%1\" does not exist.")
+                .arg(QDir::toNativeSeparators(backendProcessPath()));
+
+    logError(msg);
+}
+
+void IpcCommunicator::logStartTimeOut()
+{
+    const QString msg
+        = tr("Clang Code Model: Error: "
+             "The clangbackend executable \"%1\" could not be started (timeout after %2ms).")
+                .arg(QDir::toNativeSeparators(backendProcessPath()))
+                .arg(backEndStartTimeOutInMs);
+
+    logError(msg);
+}
+
+void IpcCommunicator::logRestartedDueToUnexpectedFinish()
+{
+    const QString msg
+        = tr("Clang Code Model: Error: "
+             "The clangbackend process has finished unexpectedly and was restarted.");
+
+    logError(msg);
+}
+
+void IpcCommunicator::logError(const QString &text)
+{
+    const QString textWithTimestamp = QDateTime::currentDateTime().toString(Qt::ISODate)
+            + ' ' + text;
+    Core::MessageManager::write(textWithTimestamp, Core::MessageManager::Flash);
+    qWarning("%s", qPrintable(textWithTimestamp));
 }
 
 void IpcCommunicator::initializeBackendWithCurrentData()

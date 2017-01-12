@@ -297,8 +297,8 @@ using namespace ExtensionSystem;
 namespace Core {
 
 // The Core Singleton
-static ICore *m_instance = 0;
-static MainWindow *m_mainwindow;
+static ICore *m_instance = nullptr;
+static MainWindow *m_mainwindow = nullptr;
 
 ICore *ICore::instance()
 {
@@ -307,7 +307,14 @@ ICore *ICore::instance()
 
 bool ICore::isNewItemDialogRunning()
 {
-    return NewDialog::isRunning() || IWizardFactory::isWizardRunning();
+    return NewDialog::currentDialog() || IWizardFactory::isWizardRunning();
+}
+
+QWidget *ICore::newItemDialog()
+{
+    if (NewDialog::currentDialog())
+        return NewDialog::currentDialog();
+    return IWizardFactory::currentWizard();
 }
 
 ICore::ICore(MainWindow *mainwindow)
@@ -321,8 +328,6 @@ ICore::ICore(MainWindow *mainwindow)
         emit coreAboutToClose();
         QCoreApplication::exit(failedTests);
     });
-    connect(m_mainwindow, &MainWindow::newItemDialogRunningChanged,
-            this, &ICore::newItemDialogRunningChanged);
 }
 
 ICore::~ICore()
@@ -338,12 +343,12 @@ void ICore::showNewItemDialog(const QString &title,
 {
     QTC_ASSERT(!isNewItemDialogRunning(), return);
     auto newDialog = new NewDialog(dialogParent());
-    connect(newDialog, &QObject::destroyed, m_instance, &ICore::validateNewItemDialogIsRunning);
+    connect(newDialog, &QObject::destroyed, m_instance, &ICore::updateNewItemDialogState);
     newDialog->setWizardFactories(factories, defaultLocation, extraVariables);
     newDialog->setWindowTitle(title);
     newDialog->showDialog();
 
-    validateNewItemDialogIsRunning();
+    updateNewItemDialogState();
 }
 
 bool ICore::showOptionsDialog(const Id page, QWidget *parent)
@@ -519,7 +524,7 @@ void ICore::raiseWindow(QWidget *widget)
     if (!widget)
         return;
     QWidget *window = widget->window();
-    if (window == m_mainwindow) {
+    if (window && window == m_mainwindow) {
         m_mainwindow->raiseWindow();
     } else {
         window->raise();
@@ -612,13 +617,15 @@ void ICore::appendAboutInformation(const QString &line)
     m_mainwindow->appendAboutInformation(line);
 }
 
-void ICore::validateNewItemDialogIsRunning()
+void ICore::updateNewItemDialogState()
 {
     static bool wasRunning = false;
-    if (wasRunning == isNewItemDialogRunning())
+    static QWidget *previousDialog = nullptr;
+    if (wasRunning == isNewItemDialogRunning() && previousDialog == newItemDialog())
         return;
     wasRunning = isNewItemDialogRunning();
-    emit instance()->newItemDialogRunningChanged();
+    previousDialog = newItemDialog();
+    emit instance()->newItemDialogStateChanged();
 }
 
 } // namespace Core

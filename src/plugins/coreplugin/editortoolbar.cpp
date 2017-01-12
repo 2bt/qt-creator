@@ -144,6 +144,7 @@ EditorToolBar::EditorToolBar(QWidget *parent) :
     d->m_editorList->setProperty("notelideasterisk", true);
     d->m_editorList->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     d->m_editorList->setMinimumContentsLength(20);
+    d->m_editorList->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     d->m_editorList->setModel(DocumentModel::model());
     d->m_editorList->setMaxVisibleItems(40);
     d->m_editorList->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -158,12 +159,6 @@ EditorToolBar::EditorToolBar(QWidget *parent) :
     d->m_backButton->setDefaultAction(d->m_goBackAction);
 
     d->m_forwardButton->setDefaultAction(d->m_goForwardAction);
-
-    if (Utils::HostOsInfo::isMacHost()) {
-        d->m_horizontalSplitAction->setIconVisibleInMenu(false);
-        d->m_verticalSplitAction->setIconVisibleInMenu(false);
-        d->m_splitNewWindowAction->setIconVisibleInMenu(false);
-    }
 
     d->m_splitButton->setIcon(Utils::Icons::SPLIT_HORIZONTAL_TOOLBAR.icon());
     d->m_splitButton->setToolTip(tr("Split"));

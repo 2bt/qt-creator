@@ -48,13 +48,13 @@ def safePrint(output):
     try:
         print(output)
     except:
-        out = ""
+        out = ''
         for c in output:
             cc = ord(c)
             if cc > 127:
-                out += "\\\\%d" % cc
+                out += '\\\\%d' % cc
             elif cc < 0:
-                out += "\\\\%d" % (cc + 256)
+                out += '\\\\%d' % (cc + 256)
             else:
                 out += c
         print(out)
@@ -80,7 +80,7 @@ def registerCommand(name, func):
 # Just convienience for 'python print ...'
 class PPCommand(gdb.Command):
     def __init__(self):
-        super(PPCommand, self).__init__("pp", gdb.COMMAND_OBSCURE)
+        super(PPCommand, self).__init__('pp', gdb.COMMAND_OBSCURE)
     def invoke(self, args, from_tty):
         print(eval(args))
 
@@ -89,7 +89,7 @@ PPCommand()
 # Just convienience for 'python print gdb.parse_and_eval(...)'
 class PPPCommand(gdb.Command):
     def __init__(self):
-        super(PPPCommand, self).__init__("ppp", gdb.COMMAND_OBSCURE)
+        super(PPPCommand, self).__init__('ppp', gdb.COMMAND_OBSCURE)
     def invoke(self, args, from_tty):
         print(gdb.parse_and_eval(args))
 
@@ -100,20 +100,20 @@ def scanStack(p, n):
     p = int(p)
     r = []
     for i in xrange(n):
-        f = gdb.parse_and_eval("{void*}%s" % p)
-        m = gdb.execute("info symbol %s" % f, to_string=True)
-        if not m.startswith("No symbol matches"):
+        f = gdb.parse_and_eval('{void*}%s' % p)
+        m = gdb.execute('info symbol %s' % f, to_string=True)
+        if not m.startswith('No symbol matches'):
             r.append(m)
         p += f.type.sizeof
     return r
 
 class ScanStackCommand(gdb.Command):
     def __init__(self):
-        super(ScanStackCommand, self).__init__("scanStack", gdb.COMMAND_OBSCURE)
+        super(ScanStackCommand, self).__init__('scanStack', gdb.COMMAND_OBSCURE)
     def invoke(self, args, from_tty):
         if len(args) == 0:
             args = 20
-        safePrint(scanStack(gdb.parse_and_eval("$sp"), int(args)))
+        safePrint(scanStack(gdb.parse_and_eval('$sp'), int(args)))
 
 ScanStackCommand()
 
@@ -134,7 +134,7 @@ class PlainDumper:
             printer = self.printer.gen_printer(value)
         except:
             printer = self.printer.invoke(value)
-        lister = getattr(printer, "children", None)
+        lister = getattr(printer, 'children', None)
         children = [] if lister is None else list(lister())
         d.putType(self.printer.name)
         val = printer.to_string()
@@ -152,16 +152,16 @@ class PlainDumper:
                     d.putSubItem(child[0], child[1])
 
 def importPlainDumpers(args):
-    if args == "off":
+    if args == 'off':
         try:
-            gdb.execute("disable pretty-printer .* .*")
+            gdb.execute('disable pretty-printer .* .*')
         except:
             # Might occur in non-ASCII directories
-            warn("COULD NOT DISABLE PRETTY PRINTERS")
+            warn('COULD NOT DISABLE PRETTY PRINTERS')
     else:
         theDumper.importPlainDumpers()
 
-registerCommand("importPlainDumpers", importPlainDumpers)
+registerCommand('importPlainDumpers', importPlainDumpers)
 
 
 
@@ -175,7 +175,7 @@ class OutputSafer:
 
     def __exit__(self, exType, exValue, exTraceBack):
         if self.d.passExceptions and not exType is None:
-            showException("OUTPUTSAFER", exType, exValue, exTraceBack)
+            showException('OUTPUTSAFER', exType, exValue, exTraceBack)
             self.d.output = self.savedOutput
         else:
             self.savedOutput.extend(self.d.output)
@@ -203,66 +203,65 @@ class Dumper(DumperBase):
 
     def prepare(self, args):
         self.output = []
-        self.currentIName = ""
-        self.currentPrintsAddress = True
-        self.currentChildType = ""
-        self.currentChildNumChild = -1
-        self.currentMaxNumChild = -1
-        self.currentNumChild = -1
-        self.currentValue = ReportItem()
-        self.currentType = ReportItem()
-        self.currentAddress = None
+        self.setVariableFetchingOptions(args)
 
-        self.resultVarName = args.get("resultvarname", "")
-        self.expandedINames = set(args.get("expanded", []))
-        self.stringCutOff = int(args.get("stringcutoff", 10000))
-        self.displayStringLimit = int(args.get("displaystringlimit", 100))
-        self.typeformats = args.get("typeformats", {})
-        self.formats = args.get("formats", {})
-        self.watchers = args.get("watchers", {})
-        self.useDynamicType = int(args.get("dyntype", "0"))
-        self.useFancy = int(args.get("fancy", "0"))
-        self.forceQtNamespace = int(args.get("forcens", "0"))
-        self.passExceptions = int(args.get("passexceptions", "0"))
-        self.showQObjectNames = int(args.get("qobjectnames", "0"))
-        self.nativeMixed = int(args.get("nativemixed", "0"))
-        self.autoDerefPointers = int(args.get("autoderef", "0"))
-        self.partialUpdate = int(args.get("partial", "0"))
-        self.fallbackQtVersion = 0x50200
-
-        #warn("NAMESPACE: '%s'" % self.qtNamespace())
-        #warn("EXPANDED INAMES: %s" % self.expandedINames)
-        #warn("WATCHERS: %s" % self.watchers)
-
-        # The guess does not need to be updated during a fetchVariables()
-        # as the result is fixed during that time (ignoring "active"
-        # dumpers causing loading of shared objects etc).
-        self.currentQtNamespaceGuess = None
-
-    def fromNativeDowncastableValue(self, nativeValue):
-        if self.useDynamicType:
-            try:
-               return self.fromNativeValue(nativeValue.cast(nativeValue.dynamic_type))
-            except:
-               pass
-        return self.fromNativeValue(nativeValue)
+    def fromFrameValue(self, nativeValue):
+        #warn('FROM FRAME VALUE: %s' % nativeValue.address)
+        val = nativeValue
+        try:
+           val = nativeValue.cast(nativeValue.dynamic_type)
+        except:
+           pass
+        return self.fromNativeValue(val)
 
     def fromNativeValue(self, nativeValue):
-        #self.check(isinstance(nativeValue, gdb.Value))
+        #warn('FROM NATIVE VALUE: %s' % nativeValue)
+        self.check(isinstance(nativeValue, gdb.Value))
         nativeType = nativeValue.type
+        code = nativeType.code
+        if code == gdb.TYPE_CODE_REF:
+            targetType = self.fromNativeType(nativeType.target().unqualified(), nativeValue)
+            val = self.createReferenceValue(toInteger(nativeValue.address), targetType)
+            #warn('CREATED REF: %s' % val)
+            return val
+        if code == gdb.TYPE_CODE_PTR:
+            try:
+                nativeTargetValue = nativeValue.dereference()
+            except:
+                nativeTargetValue = None
+            targetType = self.fromNativeType(nativeType.target().unqualified(), nativeTargetValue)
+            val = self.createPointerValue(toInteger(nativeValue), targetType)
+            #warn('CREATED PTR 1: %s' % val)
+            if not nativeValue.address is None:
+                val.laddress = toInteger(nativeValue.address)
+            #warn('CREATED PTR 2: %s' % val)
+            return val
+        if code == gdb.TYPE_CODE_TYPEDEF:
+            targetType = nativeType.strip_typedefs().unqualified()
+            #warn('TARGET TYPE: %s' % targetType)
+            if targetType.code == gdb.TYPE_CODE_ARRAY:
+                val = self.Value(self)
+                val.laddress = toInteger(nativeValue.address)
+            else:
+                # Cast may fail (e.g for arrays, see test for Bug5799)
+                val = self.fromNativeValue(nativeValue.cast(targetType))
+            val.type = self.fromNativeType(nativeType, nativeValue)
+            #warn('CREATED TYPEDEF: %s' % val)
+            return val
+
         val = self.Value(self)
         if not nativeValue.address is None:
             val.laddress = toInteger(nativeValue.address)
         else:
             size = nativeType.sizeof
-            chars = self.lookupNativeType("unsigned char")
+            chars = self.lookupNativeType('unsigned char')
             y = nativeValue.cast(chars.array(0, int(nativeType.sizeof - 1)))
             buf = bytearray(struct.pack('x' * size))
             for i in range(size):
                 buf[i] = int(y[i])
             val.ldata = bytes(buf)
 
-        val.type = self.fromNativeType(nativeType)
+        val.type = self.fromNativeType(nativeType, nativeValue)
         val.lIsInScope = not nativeValue.is_optimized_out
         code = nativeType.code
         if code == gdb.TYPE_CODE_ENUM:
@@ -272,154 +271,322 @@ class Dumper(DumperBase):
                 val.ldisplay += ' (%s)' % intval
         elif code == gdb.TYPE_CODE_COMPLEX:
             val.ldisplay = str(nativeValue)
-        elif code == gdb.TYPE_CODE_ARRAY:
-            val.type.ltarget = nativeValue[0].type.unqualified()
+        #elif code == gdb.TYPE_CODE_ARRAY:
+        #    val.type.ltarget = nativeValue[0].type.unqualified()
         return val
 
-    def fromNativeType(self, nativeType):
+    def ptrSize(self):
+        result = gdb.lookup_type('void').pointer().sizeof
+        self.ptrSize = lambda: result
+        return result
+
+    def fromNativeType(self, nativeType, nativeValue = None):
         self.check(isinstance(nativeType, gdb.Type))
-        typeobj = self.Type(self)
-        typeobj.nativeType = nativeType.unqualified()
-        typeobj.name = str(typeobj.nativeType)
-        typeobj.lbitsize = nativeType.sizeof * 8
-        typeobj.code = {
-            gdb.TYPE_CODE_TYPEDEF : TypeCodeTypedef,
-            gdb.TYPE_CODE_METHOD : TypeCodeFunction,
-            gdb.TYPE_CODE_VOID : TypeCodeVoid,
-            gdb.TYPE_CODE_FUNC : TypeCodeFunction,
-            gdb.TYPE_CODE_METHODPTR : TypeCodeFunction,
-            gdb.TYPE_CODE_MEMBERPTR : TypeCodeFunction,
-            gdb.TYPE_CODE_PTR : TypeCodePointer,
-            gdb.TYPE_CODE_REF : TypeCodeReference,
-            gdb.TYPE_CODE_BOOL : TypeCodeIntegral,
-            gdb.TYPE_CODE_CHAR : TypeCodeIntegral,
-            gdb.TYPE_CODE_INT : TypeCodeIntegral,
-            gdb.TYPE_CODE_FLT : TypeCodeFloat,
-            gdb.TYPE_CODE_ENUM : TypeCodeEnum,
-            gdb.TYPE_CODE_ARRAY : TypeCodeArray,
-            gdb.TYPE_CODE_STRUCT : TypeCodeStruct,
-            gdb.TYPE_CODE_UNION : TypeCodeStruct,
-            gdb.TYPE_CODE_COMPLEX : TypeCodeComplex,
-            gdb.TYPE_CODE_STRING : TypeCodeFortranString,
-        }[nativeType.code]
-        return typeobj
+        code = nativeType.code
+        #warn('FROM NATIVE TYPE: %s' % nativeType)
+        nativeType = nativeType.unqualified()
 
-    def nativeTypeDereference(self, nativeType):
-        return self.fromNativeType(nativeType.strip_typedefs().target())
+        if code == gdb.TYPE_CODE_PTR:
+            #warn('PTR')
+            if nativeValue is not None:
+                nativeValue = nativeValue.dereference()
+            targetType = self.fromNativeType(nativeType.target().unqualified(), nativeValue)
+            return self.createPointerType(targetType)
 
-    def nativeTypeUnqualified(self, nativeType):
-        return self.fromNativeType(nativeType.unqualified())
+        if code == gdb.TYPE_CODE_REF:
+            #warn('REF')
+            targetType = self.fromNativeType(nativeType.target().unqualified())
+            return self.createReferenceType(targetType)
 
-    def nativeTypePointer(self, nativeType):
-        return self.fromNativeType(nativeType.pointer())
+        if code == gdb.TYPE_CODE_ARRAY:
+            #warn('ARRAY')
+            nativeTargetType = nativeType.target().unqualified()
+            targetType = self.fromNativeType(nativeTargetType)
+            count = nativeType.sizeof // nativeTargetType.sizeof
+            return self.createArrayType(targetType, count)
 
-    def nativeTypeTarget(self, nativeType):
-        while nativeType.code == gdb.TYPE_CODE_TYPEDEF:
-            nativeType = nativeType.strip_typedefs().unqualified()
-        return self.fromNativeType(nativeType.target())
+        if code == gdb.TYPE_CODE_TYPEDEF:
+            #warn('TYPEDEF')
+            nativeTargetType = nativeType.unqualified()
+            while nativeTargetType.code == gdb.TYPE_CODE_TYPEDEF:
+                nativeTargetType = nativeTargetType.strip_typedefs().unqualified()
+            targetType = self.fromNativeType(nativeTargetType)
+            return self.createTypedefedType(targetType, str(nativeType))
 
-    def nativeTypeFirstBase(self, nativeType):
-        nativeFields = nativeType.fields()
-        if len(nativeFields) and nativeFields[0].is_base_class:
-            return self.fromNativeType(nativeFields[0].type)
+        if code == gdb.TYPE_CODE_ERROR:
+            warn('Type error: %s' % nativeType)
+            return self.Type(self, '')
+
+        typeId = self.nativeTypeId(nativeType)
+        res = self.typeData.get(typeId, None)
+        if res is None:
+            tdata = self.TypeData(self)
+            tdata.name = str(nativeType)
+            tdata.typeId = typeId
+            tdata.lbitsize = nativeType.sizeof * 8
+            tdata.code = {
+                #gdb.TYPE_CODE_TYPEDEF : TypeCodeTypedef, # Handled above.
+                gdb.TYPE_CODE_METHOD : TypeCodeFunction,
+                gdb.TYPE_CODE_VOID : TypeCodeVoid,
+                gdb.TYPE_CODE_FUNC : TypeCodeFunction,
+                gdb.TYPE_CODE_METHODPTR : TypeCodeFunction,
+                gdb.TYPE_CODE_MEMBERPTR : TypeCodeFunction,
+                #gdb.TYPE_CODE_PTR : TypeCodePointer,  # Handled above.
+                #gdb.TYPE_CODE_REF : TypeCodeReference,  # Handled above.
+                gdb.TYPE_CODE_BOOL : TypeCodeIntegral,
+                gdb.TYPE_CODE_CHAR : TypeCodeIntegral,
+                gdb.TYPE_CODE_INT : TypeCodeIntegral,
+                gdb.TYPE_CODE_FLT : TypeCodeFloat,
+                gdb.TYPE_CODE_ENUM : TypeCodeEnum,
+                #gdb.TYPE_CODE_ARRAY : TypeCodeArray,
+                gdb.TYPE_CODE_STRUCT : TypeCodeStruct,
+                gdb.TYPE_CODE_UNION : TypeCodeStruct,
+                gdb.TYPE_CODE_COMPLEX : TypeCodeComplex,
+                gdb.TYPE_CODE_STRING : TypeCodeFortranString,
+            }[code]
+            if tdata.code == TypeCodeEnum:
+                tdata.enumDisplay = lambda intval : \
+                    self.nativeTypeEnumDisplay(nativeType, intval)
+            if tdata.code == TypeCodeStruct:
+                tdata.lalignment = lambda : \
+                    self.nativeStructAlignment(nativeType)
+                tdata.lfields = self.listMembers(nativeType, nativeValue)
+                #tdata.lfieldByName = lambda name : \
+                #    self.nativeTypeFieldTypeByName(nativeType, name)
+            tdata.templateArguments = self.listTemplateParameters(nativeType)
+            self.registerType(typeId, tdata) # Fix up fields and template args
+        #    warn('CREATE TYPE: %s' % typeId)
+        #else:
+        #    warn('REUSE TYPE: %s' % typeId)
+        return self.Type(self, typeId)
+
+    def listTemplateParameters(self, nativeType):
+        targs = []
+        pos = 0
+        while True:
+            try:
+                targ = nativeType.template_argument(pos)
+            except:
+                break
+            if isinstance(targ, gdb.Type):
+                targs.append(self.fromNativeType(targ.unqualified()))
+            elif isinstance(targ, gdb.Value):
+                targs.append(self.fromNativeValue(targ).value())
+            else:
+                error('UNKNOWN TEMPLATE PARAMETER')
+            pos += 1
+        return targs
 
     def nativeTypeEnumDisplay(self, nativeType, intval):
         try:
-            val = gdb.parse_and_eval("(%s)%d" % (nativeType, intval))
-            return  "%s (%d)" % (val, intval)
+            val = gdb.parse_and_eval('(%s)%d' % (nativeType, intval))
+            return  '%s (%d)' % (val, intval)
         except:
-            return "%d" % intval
+            return '%d' % intval
 
-    def nativeTypeFields(self, nativeType):
-        if nativeType.code == gdb.TYPE_CODE_TYPEDEF:
-            return self.nativeTypeFields(nativeType.strip_typedefs())
+    def nativeTypeId(self, nativeType):
+        name = str(nativeType)
+        if len(name) == 0:
+            c = '0'
+        elif name == 'union {...}':
+            c = 'u'
+        elif name.endswith('{...}'):
+            c = 's'
+        else:
+            return name
+        typeId = c + ''.join(['{%s:%s}' % (f.name, self.nativeTypeId(f.type))
+                              for f in nativeType.fields()])
+        return typeId
 
+    def nativeStructAlignment(self, nativeType):
+        self.preping('align ' + str(nativeType))
+        #warn('NATIVE ALIGN FOR %s' % nativeType.name)
+        def handleItem(nativeFieldType, align):
+            a = self.fromNativeType(nativeFieldType).alignment()
+            return a if a > align else align
+        align = 1
+        for f in nativeType.fields():
+            align = handleItem(f.type, align)
+        self.ping('align ' + str(nativeType))
+        return align
+
+
+        #except:
+        #    # Happens in the BoostList dumper for a 'const bool'
+        #    # item named 'constant_time_size'. There isn't anything we can do
+        #    # in this case.
+         #   pass
+
+        #yield value.extractField(field)
+
+    def fromNativeField(self, nativeField):
+        field = self.Field(self)
+        field.name = nativeField.name
+        field.isBaseClass = nativeField.is_base_class
+        # Something without a name.
+        # Anonymous union? We need a dummy name to distinguish
+        # multiple anonymous unions in the struct.
+        # Since GDB commit b5b08fb4 anonymous structs get also reported
+        # with a 'None' name.
+        if field.name is not None and len(field.name) == 0:
+            field.name = None
+        nativeFieldType = nativeField.type.unqualified()
+
+        if hasattr(nativeField, 'bitpos'):
+            field.lbitpos = nativeField.bitpos
+
+        if hasattr(nativeField, 'bitsize') and nativeField.bitsize != 0:
+            field.lbitsize = nativeField.bitsize
+        else:
+            field.lbitsize = 8 * nativeFieldType.sizeof
+
+        if field.lbitsize != nativeFieldType.sizeof * 8:
+            field.ltype = self.createBitfieldType(str(nativeFieldType), field.lbitsize)
+        else:
+            field.ltype = self.fromNativeType(nativeFieldType)
+        return field
+
+    def memberFromField(self, nativeValue, nativeField):
+        if nativeField.is_base_class:
+            return nativeValue.cast(nativeField.type)
+        try:
+            return nativeValue[nativeField]
+        except:
+            pass
+        try:
+            return nativeValue[nativeField.name]
+        except:
+            pass
+        return None
+
+    def listMembers(self, nativeType, nativeValue):
+        #warn('LISTING MEMBERS OF %s' % nativeType)
+        try:
+            nativeValueAddress = toInteger(nativeValue.address)
+        except:
+            nativeValueAddress = None
+
+        if nativeValue is None or nativeValueAddress is None:
+            return lambda value : self.listDelayedMembers(nativeType, value)
+
+        def needsDeep(someNativeType):
+            if someNativeType.sizeof >= ptrSize:
+                for nativeField in someNativeType.fields():
+                    if nativeField.is_base_class:
+                        if nativeField.bitpos < 0 or needsDeep(nativeField.type):
+                            return True
+            return False
+
+        ptrSize = self.ptrSize()
+        if needsDeep(nativeType):
+            return self.listDeepMembers(nativeType, nativeValue, nativeValueAddress)
+
+        return self.listSimpleMembers(nativeType, nativeValue, nativeValueAddress)
+
+    def listSimpleMembers(self, nativeType, nativeValue, nativeValueAddress):
+        #warn('SIMPLE FIELDS FOR %s' % nativeType)
         fields = []
-        if nativeType.code == gdb.TYPE_CODE_ARRAY:
-            # An array.
-            typeobj = nativeType.strip_typedefs()
-            innerType = typeobj.target()
-            for i in xrange(int(typeobj.sizeof / innerType.sizeof)):
-                field = self.Field(self)
-                field.ltype = self.fromNativeType(innerType)
-                field.parentType = self.fromNativeType(nativeType)
-                field.isBaseClass = False
-                field.lbitsize = innerType.sizeof
-                field.lbitpos = i * innerType.sizeof * 8
-                fields.append(field)
-            return fields
-
-        if not nativeType.code in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION):
-            return fields
-
-        nativeIndex = 0
-        baseIndex = 0
-        nativeFields = nativeType.fields()
-        #warn("NATIVE FIELDS: %s" % nativeFields)
-        for nativeField in nativeFields:
-            #warn("FIELD: %s" % nativeField)
-            #warn("  DIR: %s" % dir(nativeField))
-            #warn("  BITSIZE: %s" % nativeField.bitsize)
-            #warn("  ARTIFICIAL: %s" % nativeField.artificial)
-            #warn("FIELD NAME: %s" % nativeField.name)
-            #warn("FIELD TYPE: %s" % nativeField.type)
-            #self.check(isinstance(nativeField, gdb.Field))
-            field = self.Field(self)
-            field.ltype = self.fromNativeType(nativeField.type)
-            field.parentType = self.fromNativeType(nativeType)
-            field.name = nativeField.name
-            field.isBaseClass = nativeField.is_base_class
-            if hasattr(nativeField, 'bitpos'):
-                field.lbitpos = nativeField.bitpos
-            if hasattr(nativeField, 'bitsize') and nativeField.bitsize != 0:
-                field.lbitsize = nativeField.bitsize
-            else:
-                field.lbitsize = 8 * nativeField.type.sizeof
-
-            if nativeField.is_base_class:
-                # Field is base type. We cannot use nativeField.name as part
-                # of the iname as it might contain spaces and other
-                # strange characters.
-                field.name = nativeField.name
-                field.baseIndex = baseIndex
-                baseIndex += 1
-            else:
-                # Since GDB commit b5b08fb4 anonymous structs get also reported
-                # with a 'None' name.
-                if nativeField.name is None or len(nativeField.name) == 0:
-                    # Something without a name.
-                    # Anonymous union? We need a dummy name to distinguish
-                    # multiple anonymous unions in the struct.
-                    self.anonNumber += 1
-                    field.name = "#%s" % self.anonNumber
-                else:
-                    # Normal named field.
-                    field.name = nativeField.name
-
-            field.nativeIndex = nativeIndex
+        for nativeField in nativeType.fields():
+            nativeFieldType = nativeField.type.unqualified()
+            #warn('SIMPLE FIELD: %s' % nativeField.name)
+            #warn('  BITSIZE: %s' % nativeField.bitsize)
+            #warn('  NAME: %s' % nativeField.name)
+            #warn('  TYPE: %s' % nativeFieldType)
+            #warn('  TYPEID: %s' % self.nativeTypeId(nativeFieldType))
+            field = self.fromNativeField(nativeField)
+            if field.ltype.code != TypeCodeBitfield:
+                nativeMember = self.memberFromField(nativeValue, nativeField)
+                if nativeMember is None:
+                    warn('CANNOT EXTRACT FIELD %s FROM %s' % (nativeField.name, nativeValue))
+                    #continue
+                if nativeMember.address is None: # Could be a static member.
+                    warn('NO ADDRESS OF %s' % nativeMember)
+                    continue
+                nativeMemberAddress = toInteger(nativeMember.address)
+                offset = nativeMemberAddress - nativeValueAddress
+                field.lbitpos = 8 * offset
             fields.append(field)
-            nativeIndex += 1
-
-        #warn("FIELDS: %s" % fields)
         return fields
 
-    def nativeTypeStripTypedefs(self, typeobj):
-        typeobj = typeobj.unqualified()
-        while typeobj.code == gdb.TYPE_CODE_TYPEDEF:
-            typeobj = typeobj.strip_typedefs().unqualified()
-        return self.fromNativeType(typeobj)
+    def listDelayedMembers(self, nativeType, value):
+        #warn('DELAYED FIELDS FOR %s' % nativeType)
+        if value.laddress is None:
+            error('No address for object of type %s' % nativeType)
+        nativeTypePointer = nativeType.unqualified().pointer()
+        nativeValue = gdb.Value(value.laddress).cast(nativeTypePointer).dereference()
+        return self.listSimpleMembers(nativeType, nativeValue, value.laddress)
 
-    def listOfLocals(self, partialVar):
+    # The is expensive as it recurses through all base classes. Ideally this
+    # should only be used if virtual inheritance is known to be involved.
+    def listDeepMembers(self, nativeType, nativeValue, nativeBaseAddress, bpbase = 0):
+        #warn('DEEP FIELDS FOR %s AT 0x%x' % (nativeType, nativeBaseAddress))
+        fields = []
+        for nativeField in nativeType.fields():
+            nativeFieldType = nativeField.type.unqualified()
+            #warn('DEEP FIELD: %s' % nativeField.name)
+            #warn('  SIZE: %s' % nativeField.bitsize)
+            #warn('  POS: %s' % nativeField.bitpos)
+            #warn('  BPBASE: %s' % bpbase)
+            #warn('  ARTIFICIAL: %s' % nativeField.artificial)
+            #warn('  NAME: %s' % nativeField.name)
+            #warn('  TYPE: %s' % nativeFieldType)
+            #warn('  TYPEID: %s' % self.nativeTypeId(nativeFieldType))
+            nativeMember = self.memberFromField(nativeValue, nativeField)
+            if nativeField.is_base_class:
+                #warn('  THIS IS VIRTUAL BASE OF TYPE %s' % nativeField.type)
+                # This is a virtual base, we need to recurse *now*, as later
+                # there is no way to generate a nativeValue with this type.
+                #warn('   NATIVE MEMBER: %s' % nativeMember)
+                pureFieldType = self.fromNativeType(nativeFieldType)
+                fieldTypeId = pureFieldType.typeId + ' in ' + str(nativeType)
+                fieldTypeData = pureFieldType.typeData().copy()
+                bp = - nativeField.bitpos
+                fieldTypeData.lfields = self.listDeepMembers(
+                    nativeField.type, nativeMember, nativeBaseAddress, bpbase + bp - 64)
+                self.registerType(fieldTypeId, fieldTypeData)
+
+                field = self.Field(self)
+                field.name = nativeField.name
+                #field.name = fieldTypeId
+                field.ltype = self.Type(self, fieldTypeId)
+                field.isBaseClass = True
+                field.isArtificial = True
+                field.lbitsize = None
+                field.lbitpos = None
+
+                fields.append(field)
+            else:
+                # This is a normal field or non-virtual base.
+                field = self.fromNativeField(nativeField)
+                if field.ltype.code != TypeCodeBitfield:
+                    #if field.lbitpos is None:
+                    try:
+                        nativeMemberAddress = toInteger(nativeMember.address)
+                        #warn('  NATIVE MEMBER ADDRESS: 0x%x' % nativeMemberAddress)
+                        offset = nativeMemberAddress - nativeBaseAddress
+                        #offset = bpbase + nativeField.bitpos
+                        #warn('DEEP OFFSET: %s  POS: %s' % (offset // 8, field.lbitpos // 8))
+                        field.lbitpos = offset * 8
+                    except:
+                        field.lbitpos = None
+                        field.lvalue = 'XXX'
+                    #else:
+                    #    warn('REUSING BITPOS %s FOR %s' % (field.lbitpos, field.name))
+                fields.append(field)
+        return fields
+
+
+    def listLocals(self, partialVar):
         frame = gdb.selected_frame()
 
         try:
             block = frame.block()
-            #warn("BLOCK: %s " % block)
+            #warn('BLOCK: %s ' % block)
         except RuntimeError as error:
-            #warn("BLOCK IN FRAME NOT ACCESSIBLE: %s" % error)
+            #warn('BLOCK IN FRAME NOT ACCESSIBLE: %s' % error)
             return []
         except:
-            warn("BLOCK NOT ACCESSIBLE FOR UNKNOWN REASONS")
+            warn('BLOCK NOT ACCESSIBLE FOR UNKNOWN REASONS')
             return []
 
         items = []
@@ -434,27 +601,37 @@ class Dumper(DumperBase):
               if symbol.is_variable or symbol.is_argument:
                 name = symbol.print_name
 
-                if name == "__in_chrg" or name == "__PRETTY_FUNCTION__":
+                if name in ('__in_chrg', '__PRETTY_FUNCTION__'):
                     continue
 
                 if not partialVar is None and partialVar != name:
                     continue
 
-                # "NotImplementedError: Symbol type not yet supported in
-                # Python scripts."
-                #warn("SYMBOL %s  (%s, %s)): " % (symbol, name, symbol.name))
-                try:
-                    value = self.fromNativeDowncastableValue(frame.read_var(name, block))
-                    #warn("READ 1: %s" % value)
+                # 'NotImplementedError: Symbol type not yet supported in
+                # Python scripts.'
+                #warn('SYMBOL %s  (%s, %s)): ' % (symbol, name, symbol.name))
+                if self.passExceptions and not self.isTesting:
+                    nativeValue = frame.read_var(name, block)
+                    value = self.fromFrameValue(nativeValue)
                     value.name = name
+                    #warn('READ 0: %s' % value.stringify())
+                    items.append(value)
+                    continue
+
+                try:
+                    # Same as above, but for production.
+                    nativeValue = frame.read_var(name, block)
+                    value = self.fromFrameValue(nativeValue)
+                    value.name = name
+                    #warn('READ 1: %s' % value.stringify())
                     items.append(value)
                     continue
                 except:
                     pass
 
                 try:
-                    #warn("READ 2: %s" % item.value)
-                    value = self.fromNativeDowncastableValue(frame.read_var(name))
+                    #warn('READ 2: %s' % item.value)
+                    value = self.fromFrameValue(frame.read_var(name))
                     value.name = name
                     items.append(value)
                     continue
@@ -467,14 +644,15 @@ class Dumper(DumperBase):
                     pass
 
                 try:
-                    #warn("READ 3: %s %s" % (name, item.value))
-                    #warn("ITEM 3: %s" % item.value)
-                    value = self.fromNativeDowncastableValue(gdb.parse_and_eval(name))
+                    #warn('READ 3: %s %s' % (name, item.value))
+                    #warn('ITEM 3: %s' % item.value)
+                    value = self.fromFrameValue(gdb.parse_and_eval(name))
+                    value.name = name
                     items.append(value)
                 except:
                     # Can happen in inlined code (see last line of
-                    # RowPainter::paintChars(): "RuntimeError:
-                    # No symbol \"__val\" in current context.\n"
+                    # RowPainter::paintChars(): 'RuntimeError:
+                    # No symbol '__val' in current context.\n'
                     pass
 
             # The outermost block in a function has the function member
@@ -496,6 +674,11 @@ class Dumper(DumperBase):
         self.resetStats()
         self.prepare(args)
 
+        self.preping('endian')
+        self.isBigEndian = gdb.execute('show endian', to_string = True).find('big endian') > 0
+        self.ping('endian')
+        self.packCode = '>' if self.isBigEndian else '<'
+
         (ok, res) = self.tryFetchInterpreterVariables(args)
         if ok:
             safePrint(res)
@@ -503,18 +686,19 @@ class Dumper(DumperBase):
 
         self.output.append('data=[')
 
-        partialVar = args.get("partialvar", "")
+        partialVar = args.get('partialvar', '')
         isPartial = len(partialVar) > 0
         partialName = partialVar.split('.')[1].split('@')[0] if isPartial else None
 
-        variables = self.listOfLocals(partialName)
+        variables = self.listLocals(partialName)
+        #warn('VARIABLES: %s' % variables)
 
         # Take care of the return value of the last function call.
         if len(self.resultVarName) > 0:
             try:
                 value = self.parseAndEvaluate(self.resultVarName)
                 value.name = self.resultVarName
-                value.iname = "return." + self.resultVarName
+                value.iname = 'return.' + self.resultVarName
                 variables.append(value)
             except:
                 # Don't bother. It's only supplementary information anyway.
@@ -541,27 +725,26 @@ class Dumper(DumperBase):
             self.qtNamespaceToReport = None
 
         self.output.append(',partial="%d"' % isPartial)
+        self.output.append(',counts=%s' % self.counts)
+        self.output.append(',timimgs=%s' % self.timings)
 
-        self.preping('safePrint')
+        tt = time.time()
         safePrint(''.join(self.output))
-        self.ping('safePrint')
-        safePrint('"%s"' % str(self.dumpStats()))
+        print(',time="%d"' % int(1000 * (tt - time.time())))
 
     def parseAndEvaluate(self, exp):
-        #warn("EVALUATE '%s'" % exp)
+        #warn('EVALUATE "%s"' % exp)
         try:
             val = gdb.parse_and_eval(exp)
         except RuntimeError as error:
-            warn("Cannot evaluate '%s': %s" % (exp, error))
             if self.passExceptions:
-                raise error
-            else:
-                return None
+                warn("Cannot evaluate '%s': %s" % (exp, error))
+            return None
         return self.fromNativeValue(val)
 
     def callHelper(self, rettype, value, function, args):
         # args is a tuple.
-        arg = ""
+        arg = ''
         for i in range(len(args)):
             if i:
                 arg += ','
@@ -571,48 +754,39 @@ class Dumper(DumperBase):
             else:
                 arg += a
 
-        #warn("CALL: %s -> %s(%s)" % (value, function, arg))
-        typeName = self.stripClassTag(value.type.name)
-        if typeName.find(":") >= 0:
+        #warn('CALL: %s -> %s(%s)' % (value, function, arg))
+        typeName = value.type.name
+        if typeName.find(':') >= 0:
             typeName = "'" + typeName + "'"
         # 'class' is needed, see http://sourceware.org/bugzilla/show_bug.cgi?id=11912
-        #exp = "((class %s*)%s)->%s(%s)" % (typeName, value.address, function, arg)
-        addr = value.address()
-        if not addr:
-            addr = self.pokeValue(value)
-        #warn("PTR: %s -> %s(%s)" % (value, function, addr))
-        exp = "((%s*)0x%x)->%s(%s)" % (typeName, addr, function, arg)
-        #warn("CALL: %s" % exp)
+        #exp = '((class %s*)%s)->%s(%s)' % (typeName, value.laddress, function, arg)
+        addr = value.laddress
+        if addr is None:
+           addr = self.pokeValue(value)
+        #warn('PTR: %s -> %s(%s)' % (value, function, addr))
+        exp = '((%s*)0x%x)->%s(%s)' % (typeName, addr, function, arg)
+        #warn('CALL: %s' % exp)
         result = gdb.parse_and_eval(exp)
-        #warn("  -> %s" % result)
-        if not value.address():
-            gdb.parse_and_eval("free((void*)0x%x)" % addr)
-        return self.fromNativeValue(result)
+        #warn('  -> %s' % result)
+        res = self.fromNativeValue(result)
+        if value.laddress is None:
+            self.releaseValue(addr)
+        return res
 
     def makeExpression(self, value):
-        typename = "::" + self.stripClassTag(value.type.name)
-        #warn("  TYPE: %s" % typename)
-        exp = "(*(%s*)(0x%x))" % (typename, value.address())
-        #warn("  EXP: %s" % exp)
+        typename = '::' + value.type.name
+        #warn('  TYPE: %s' % typename)
+        exp = '(*(%s*)(0x%x))' % (typename, value.address())
+        #warn('  EXP: %s' % exp)
         return exp
 
     def makeStdString(init):
         # Works only for small allocators, but they are usually empty.
-        gdb.execute("set $d=(std::string*)calloc(sizeof(std::string), 2)");
-        gdb.execute("call($d->basic_string(\"" + init +
-            "\",*(std::allocator<char>*)(1+$d)))")
-        value = gdb.parse_and_eval("$d").dereference()
-        #warn("  TYPE: %s" % value.type)
-        #warn("  ADDR: %s" % value.address)
-        #warn("  VALUE: %s" % value)
+        gdb.execute('set $d=(std::string*)calloc(sizeof(std::string), 2)');
+        gdb.execute('call($d->basic_string("' + init +
+            '",*(std::allocator<char>*)(1+$d)))')
+        value = gdb.parse_and_eval('$d').dereference()
         return value
-
-    def nativeTypeTemplateArgument(self, nativeType, position, numeric):
-        #warn("NATIVE TYPE: %s" % dir(nativeType))
-        arg = nativeType.template_argument(position)
-        if numeric:
-            return int(str(arg))
-        return self.fromNativeType(arg)
 
     def pokeValue(self, value):
         # Allocates inferior memory and copies the contents of value.
@@ -621,20 +795,24 @@ class Dumper(DumperBase):
         size = value.type.size()
         data = value.data()
         h = self.hexencode(data)
-        #warn("DATA: %s" % h
-        string = ''.join("\\x" + h[2*i:2*i+2] for i in range(size))
-        exp = '(%s*)memcpy(calloc(%d, 1), "%s", %d)' % (value.type.name, size, string, size)
-        #warn("EXP: %s" % exp)
+        #warn('DATA: %s' % h)
+        string = ''.join('\\x' + h[2*i:2*i+2] for i in range(size))
+        exp = '(%s*)memcpy(calloc(%d, 1), "%s", %d)' \
+            % (value.type.name, size, string, size)
+        #warn('EXP: %s' % exp)
         res = gdb.parse_and_eval(exp)
-        #warn("RES: %s" % res)
+        #warn('RES: %s' % res)
         return toInteger(res)
 
+    def releaseValue(self, address):
+        gdb.parse_and_eval('free(0x%x)' % address)
+
     def setValue(self, address, typename, value):
-        cmd = "set {%s}%s=%s" % (typename, address, value)
+        cmd = 'set {%s}%s=%s' % (typename, address, value)
         gdb.execute(cmd)
 
     def setValues(self, address, typename, values):
-        cmd = "set {%s[%s]}%s={%s}" \
+        cmd = 'set {%s[%s]}%s={%s}' \
             % (typename, len(values), address, ','.join(map(str, values)))
         gdb.execute(cmd)
 
@@ -651,10 +829,16 @@ class Dumper(DumperBase):
         return self.cachedInferior
 
     def readRawMemory(self, address, size):
-        return self.selectedInferior().read_memory(address, size)
+        #warn('READ: %s FROM 0x%x' % (size, address))
+        if address == 0 or size == 0:
+            return bytes()
+        self.preping('readMem')
+        res = self.selectedInferior().read_memory(address, size)
+        self.ping('readMem')
+        return res
 
     def findStaticMetaObject(self, typename):
-        symbolName = typename + "::staticMetaObject"
+        symbolName = typename + '::staticMetaObject'
         symbol = gdb.lookup_global_symbol(symbolName, gdb.SYMBOL_VAR_DOMAIN)
         if not symbol:
             return 0
@@ -680,9 +864,18 @@ class Dumper(DumperBase):
         # We get i686-w64-mingw32
         return 'mingw' in gdb.TARGET_CONFIG.lower()
 
+    def isMsvcTarget(self):
+        return False
+
+    def prettySymbolByAddress(self, address):
+        try:
+            return str(gdb.parse_and_eval('(void(*))0x%x' % address))
+        except:
+            return '0x%x' % address
+
     def qtVersionString(self):
         try:
-            return str(gdb.lookup_symbol("qVersion")[0].value()())
+            return str(gdb.lookup_symbol('qVersion')[0].value()())
         except:
             pass
         try:
@@ -695,7 +888,7 @@ class Dumper(DumperBase):
     def qtVersion(self):
         try:
             # Only available with Qt 5.3+
-            qtversion = int(str(gdb.parse_and_eval("((void**)&qtHookData)[2]")), 16)
+            qtversion = int(str(gdb.parse_and_eval('((void**)&qtHookData)[2]')), 16)
             self.qtVersion = lambda: qtversion
             return qtversion
         except:
@@ -710,21 +903,6 @@ class Dumper(DumperBase):
         except:
             # Use fallback until we have a better answer.
             return self.fallbackQtVersion
-
-    def isQt3Support(self):
-        if self.qtVersion() >= 0x050000:
-            return False
-        else:
-            try:
-                # This will fail on Qt 4 without Qt 3 support
-                gdb.execute("ptype QChar::null", to_string=True)
-                self.cachedIsQt3Suport = True
-            except:
-                self.cachedIsQt3Suport = False
-
-        # Memoize good results.
-        self.isQt3Support = lambda: self.cachedIsQt3Suport
-        return self.cachedIsQt3Suport
 
     def createSpecialBreakpoints(self, args):
         self.specialBreakpoints = []
@@ -742,24 +920,24 @@ class Dumper(DumperBase):
 
         # FIXME: ns is accessed too early. gdb.Breakpoint() has no
         # 'rbreak' replacement, and breakpoints created with
-        # 'gdb.execute("rbreak...") cannot be made invisible.
+        # 'gdb.execute('rbreak...') cannot be made invisible.
         # So let's ignore the existing of namespaced builds for this
         # fringe feature here for now.
         ns = self.qtNamespace()
         if args.get('breakonabort', 0):
-            self.specialBreakpoints.append(newSpecial("abort"))
+            self.specialBreakpoints.append(newSpecial('abort'))
 
         if args.get('breakonwarning', 0):
-            self.specialBreakpoints.append(newSpecial(ns + "qWarning"))
-            self.specialBreakpoints.append(newSpecial(ns + "QMessageLogger::warning"))
+            self.specialBreakpoints.append(newSpecial(ns + 'qWarning'))
+            self.specialBreakpoints.append(newSpecial(ns + 'QMessageLogger::warning'))
 
         if args.get('breakonfatal', 0):
-            self.specialBreakpoints.append(newSpecial(ns + "qFatal"))
-            self.specialBreakpoints.append(newSpecial(ns + "QMessageLogger::fatal"))
+            self.specialBreakpoints.append(newSpecial(ns + 'qFatal'))
+            self.specialBreakpoints.append(newSpecial(ns + 'QMessageLogger::fatal'))
 
     #def threadname(self, maximalStackDepth, objectPrivateType):
     #    e = gdb.selected_frame()
-    #    out = ""
+    #    out = ''
     #    ns = self.qtNamespace()
     #    while True:
     #        maximalStackDepth -= 1
@@ -768,17 +946,16 @@ class Dumper(DumperBase):
     #        e = e.older()
     #        if e == None or e.name() == None:
     #            break
-    #        if e.name() == ns + "QThreadPrivate::start" \
-    #                or e.name() == "_ZN14QThreadPrivate5startEPv@4":
+    #        if e.name() in (ns + 'QThreadPrivate::start', '_ZN14QThreadPrivate5startEPv@4'):
     #            try:
-    #                thrptr = e.read_var("thr").dereference()
-    #                d_ptr = thrptr["d_ptr"]["d"].cast(objectPrivateType).dereference()
+    #                thrptr = e.read_var('thr').dereference()
+    #                d_ptr = thrptr['d_ptr']['d'].cast(objectPrivateType).dereference()
     #                try:
-    #                    objectName = d_ptr["objectName"]
+    #                    objectName = d_ptr['objectName']
     #                except: # Qt 5
-    #                    p = d_ptr["extraData"]
+    #                    p = d_ptr['extraData']
     #                    if not self.isNull(p):
-    #                        objectName = p.dereference()["objectName"]
+    #                        objectName = p.dereference()['objectName']
     #                if not objectName is None:
     #                    (data, size, alloc) = self.stringData(objectName)
     #                    if size > 0:
@@ -805,7 +982,7 @@ class Dumper(DumperBase):
         #oldthread = gdb.selected_thread()
         #if oldthread:
         #    try:
-        #        objectPrivateType = gdb.lookup_type(ns + "QObjectPrivate").pointer()
+        #        objectPrivateType = gdb.lookup_type(ns + 'QObjectPrivate').pointer()
         #        inferior = self.selectedInferior()
         #        for thread in inferior.threads():
         #            thread.switch()
@@ -817,9 +994,9 @@ class Dumper(DumperBase):
 
 
     def importPlainDumper(self, printer):
-        name = printer.name.replace("::", "__")
+        name = printer.name.replace('::', '__')
         self.qqDumpers[name] = PlainDumper(printer)
-        self.qqFormats[name] = ""
+        self.qqFormats[name] = ''
 
     def importPlainDumpers(self):
         for obj in gdb.objfiles():
@@ -828,56 +1005,73 @@ class Dumper(DumperBase):
                     self.importPlainDumper(printer)
 
     def qtNamespace(self):
+        self.preping('qtNamespace')
+        res = self.qtNamespaceX()
+        self.ping('qtNamespace')
+        return res
+
+    def findSymbol(self, symbolName):
+        try:
+            return toInteger(gdb.parse_and_eval("(size_t)&'%s'" % symbolName))
+        except:
+            return 0
+
+    def qtNamespaceX(self):
         if not self.currentQtNamespaceGuess is None:
             return self.currentQtNamespaceGuess
 
-        # This only works when called from a valid frame.
-        try:
-            cand = "QArrayData::shared_null"
-            symbol = gdb.lookup_symbol(cand)[0]
-            if symbol:
-                ns = symbol.name[:-len(cand)]
-                self.qtNamespaceToReport = ns
-                self.qtNamespace = lambda: ns
-                return ns
-        except:
-            pass
+        for objfile in gdb.objfiles():
+            name = objfile.filename
+            if name.find('/libQt5Core') >= 0:
+                ns = ''
 
-        try:
-            # This is Qt, but not 5.x.
-            cand = "QByteArray::shared_null"
-            symbol = gdb.lookup_symbol(cand)[0]
-            if symbol:
-                ns = symbol.name[:-len(cand)]
-                self.qtNamespaceToReport = ns
-                self.qtNamespace = lambda: ns
-                self.fallbackQtVersion = 0x40800
-                return ns
-        except:
-            pass
+                # This only works when called from a valid frame.
+                try:
+                    cand = 'QArrayData::shared_null'
+                    symbol = gdb.lookup_symbol(cand)[0]
+                    if symbol:
+                        ns = symbol.name[:-len(cand)]
+                except:
+                    symbol = None
 
-        try:
-            # Last fall backs.
-            s = gdb.execute("ptype QByteArray", to_string=True)
-            if s.find("QMemArray") >= 0:
-                # Qt 3.
-                self.qtNamespaceToReport = ""
-                self.qtNamespace = lambda: ""
-                self.qtVersion = lambda: 0x30308
-                self.fallbackQtVersion = 0x30308
-                return ""
-            # Seemingly needed with Debian's GDB 7.4.1
-            pos1 = s.find("class")
-            pos2 = s.find("QByteArray")
-            if pos1 > -1 and pos2 > -1:
-                ns = s[s.find("class") + 6:s.find("QByteArray")]
+                if symbol is None:
+                    try:
+                        # Some GDB 7.11.1 on Arch Linux.
+                        cand = 'QArrayData::shared_null[0]'
+                        val = gdb.parse_and_eval(cand)
+                        if val.type is not None:
+                            typeobj = val.type.unqualified()
+                            ns = typeobj.name[:-len('QArrayData')]
+                    except:
+                        pass
+
+                lenns = len(ns)
+                strns = ('%d%s' % (lenns - 2, ns[:lenns - 2])) if lenns else ''
+
+                if lenns:
+                    sym = '_ZN%s7QObject11customEventEPNS_6QEventE' % strns
+                else:
+                    sym = '_ZN7QObject11customEventEP6QEvent'
+                self.qtCustomEventFunc = self.findSymbol(sym)
+
+                if lenns:
+                    sym = '_ZN%s7QObject11customEventEPNS_6QEventE@plt' % strns
+                else:
+                    sym = '_ZN7QObject11customEventEP6QEvent@plt'
+                self.qtCustomEventPltFunc = self.findSymbol(sym)
+
+                sym = '_ZNK7%sQObject8propertyEPKc' % strns
+                self.qtPropertyFunc = self.findSymbol(sym)
+
+                # This might be wrong, but we can't do better: We found
+                # a libQt5Core and could not extract a namespace.
+                # The best guess is that there isn't any.
                 self.qtNamespaceToReport = ns
                 self.qtNamespace = lambda: ns
                 return ns
-        except:
-            pass
-        self.currentQtNamespaceGuess = ""
-        return ""
+
+        self.currentQtNamespaceGuess = ''
+        return ''
 
     def assignValue(self, args):
         typeName = self.hexdecode(args['type'])
@@ -887,7 +1081,7 @@ class Dumper(DumperBase):
         ns = self.qtNamespace()
         if typeName.startswith(ns):
             typeName = typeName[len(ns):]
-        typeName = typeName.replace("::", "__")
+        typeName = typeName.replace('::', '__')
         pos = typeName.find('<')
         if pos != -1:
             typeName = typeName[0:pos]
@@ -896,28 +1090,42 @@ class Dumper(DumperBase):
             expr = gdb.parse_and_eval(expr)
             self.qqEditable[typeName](self, expr, value)
         else:
-            cmd = "set variable (%s)=%s" % (expr, value)
+            cmd = 'set variable (%s)=%s' % (expr, value)
             gdb.execute(cmd)
 
     def nativeDynamicTypeName(self, address, baseType):
-        try:
-            vtbl = gdb.execute("info symbol {%s*}0x%x" % (baseType.name, address), to_string = True)
-        except:
+        # Needed for Gdb13393 test.
+        nativeType = self.lookupNativeType(baseType.name)
+        if nativeType is None:
             return None
-        pos1 = vtbl.find("vtable ")
-        if pos1 == -1:
-            return None
-        pos1 += 11
-        pos2 = vtbl.find(" +", pos1)
-        if pos2 == -1:
-            return None
-        return vtbl[pos1 : pos2]
+        nativeTypePointer = nativeType.pointer()
+        nativeValue = gdb.Value(address).cast(nativeTypePointer).dereference()
+        val = nativeValue.cast(nativeValue.dynamic_type)
+        return str(val.type)
+        #try:
+        #    vtbl = gdb.execute('info symbol {%s*}0x%x' % (baseType.name, address), to_string = True)
+        #except:
+        #    return None
+        #pos1 = vtbl.find('vtable ')
+        #if pos1 == -1:
+        #    return None
+        #pos1 += 11
+        #pos2 = vtbl.find(' +', pos1)
+        #if pos2 == -1:
+        #    return None
+        #return vtbl[pos1 : pos2]
+
+    def nativeDynamicType(self, address, baseType):
+        # Needed for Gdb13393 test.
+        nativeType = self.lookupNativeType(baseType.name)
+        if nativeType is None:
+            return baseType
+        nativeTypePointer = nativeType.pointer()
+        nativeValue = gdb.Value(address).cast(nativeTypePointer).dereference()
+        return self.fromNativeType(nativeValue.dynamic_type)
 
     def enumExpression(self, enumType, enumValue):
-        return self.qtNamespace() + "Qt::" + enumValue
-
-    def lookupType(self, typeName):
-        return self.fromNativeType(self.lookupNativeType(typeName))
+        return self.qtNamespace() + 'Qt::' + enumValue
 
     def lookupNativeType(self, typeName):
         nativeType = self.lookupNativeTypeHelper(typeName)
@@ -927,18 +1135,18 @@ class Dumper(DumperBase):
 
     def lookupNativeTypeHelper(self, typeName):
         typeobj = self.typeCache.get(typeName)
-        #warn("LOOKUP 1: %s -> %s" % (typeName, typeobj))
+        #warn('LOOKUP 1: %s -> %s' % (typeName, typeobj))
         if not typeobj is None:
             return typeobj
 
-        if typeName == "void":
+        if typeName == 'void':
             typeobj = gdb.lookup_type(typeName)
             self.typeCache[typeName] = typeobj
             self.typesToReport[typeName] = typeobj
             return typeobj
 
         #try:
-        #    typeobj = gdb.parse_and_eval("{%s}&main" % typeName).typeobj
+        #    typeobj = gdb.parse_and_eval('{%s}&main' % typeName).typeobj
         #    if not typeobj is None:
         #        self.typeCache[typeName] = typeobj
         #        self.typesToReport[typeName] = typeobj
@@ -947,12 +1155,12 @@ class Dumper(DumperBase):
         #    pass
 
         # See http://sourceware.org/bugzilla/show_bug.cgi?id=13269
-        # gcc produces "{anonymous}", gdb "(anonymous namespace)"
-        # "<unnamed>" has been seen too. The only thing gdb
-        # understands when reading things back is "(anonymous namespace)"
-        if typeName.find("{anonymous}") != -1:
+        # gcc produces '{anonymous}', gdb '(anonymous namespace)'
+        # '<unnamed>' has been seen too. The only thing gdb
+        # understands when reading things back is '(anonymous namespace)'
+        if typeName.find('{anonymous}') != -1:
             ts = typeName
-            ts = ts.replace("{anonymous}", "(anonymous namespace)")
+            ts = ts.replace('{anonymous}', '(anonymous namespace)')
             typeobj = self.lookupNativeType(ts)
             if not typeobj is None:
                 self.typeCache[typeName] = typeobj
@@ -967,24 +1175,23 @@ class Dumper(DumperBase):
 
         ts = typeName
         while True:
-            #warn("TS: '%s'" % ts)
-            if ts.startswith("class "):
+            if ts.startswith('class '):
                 ts = ts[6:]
-            elif ts.startswith("struct "):
+            elif ts.startswith('struct '):
                 ts = ts[7:]
-            elif ts.startswith("const "):
+            elif ts.startswith('const '):
                 ts = ts[6:]
-            elif ts.startswith("volatile "):
+            elif ts.startswith('volatile '):
                 ts = ts[9:]
-            elif ts.startswith("enum "):
+            elif ts.startswith('enum '):
                 ts = ts[5:]
-            elif ts.endswith(" const"):
+            elif ts.endswith(' const'):
                 ts = ts[:-6]
-            elif ts.endswith(" volatile"):
+            elif ts.endswith(' volatile'):
                 ts = ts[:-9]
-            elif ts.endswith("*const"):
+            elif ts.endswith('*const'):
                 ts = ts[:-5]
-            elif ts.endswith("*volatile"):
+            elif ts.endswith('*volatile'):
                 ts = ts[:-8]
             else:
                 break
@@ -1008,19 +1215,19 @@ class Dumper(DumperBase):
                 typeobj = self.parse_and_eval(exp).type.target()
                 #warn("LOOKING UP 3 '%s'" % typeobj)
             except:
-                # Can throw "RuntimeError: No type named class Foo."
+                # Can throw 'RuntimeError: No type named class Foo.'
                 pass
         except:
             #warn("LOOKING UP '%s' FAILED" % ts)
             pass
 
         if not typeobj is None:
-            #warn("CACHING: %s" % typeobj)
+            #warn('CACHING: %s' % typeobj)
             self.typeCache[typeName] = typeobj
             self.typesToReport[typeName] = typeobj
 
-        # This could still be None as gdb.lookup_type("char[3]") generates
-        # "RuntimeError: No type named char[3]"
+        # This could still be None as gdb.lookup_type('char[3]') generates
+        # 'RuntimeError: No type named char[3]'
         #self.typeCache[typeName] = typeobj
         #self.typesToReport[typeName] = typeobj
         return typeobj
@@ -1029,9 +1236,10 @@ class Dumper(DumperBase):
         gdb.execute('continue')
 
     def fetchStack(self, args):
-        def fromNativePath(str):
-            return str.replace('\\', '/')
+        def fromNativePath(string):
+            return string.replace('\\', '/')
 
+        extraQml = int(args.get('extraqml', '0'))
         limit = int(args['limit'])
         if limit <= 0:
            limit = 10000
@@ -1039,16 +1247,50 @@ class Dumper(DumperBase):
         self.prepare(args)
         self.output = []
 
-        frame = gdb.newest_frame()
         i = 0
+        if extraQml:
+            frame = gdb.newest_frame()
+            ns = self.qtNamespace()
+            needle = self.qtNamespace() + 'QV4::ExecutionEngine'
+            pat = '%sqt_v4StackTrace(((%sQV4::ExecutionEngine *)0x%x)->currentContext)'
+            done = False
+            while i < limit and frame and not done:
+                block = None
+                try:
+                    block = frame.block()
+                except:
+                    pass
+                if block is not None:
+                    for symbol in block:
+                        if symbol.is_variable or symbol.is_argument:
+                            value = symbol.value(frame)
+                            typeobj = value.type
+                            if typeobj.code == gdb.TYPE_CODE_PTR:
+                               dereftype = typeobj.target().unqualified()
+                               if dereftype.name == needle:
+                                    addr = toInteger(value)
+                                    expr = pat % (ns, ns, addr)
+                                    res = str(gdb.parse_and_eval(expr))
+                                    pos = res.find('"stack=[')
+                                    if pos != -1:
+                                        res = res[pos + 8:-2]
+                                        res = res.replace('\\\"', '\"')
+                                        res = res.replace('func=', 'function=')
+                                        self.put(res)
+                                        done = True
+                                        break
+                frame = frame.older()
+                i += 1
+
+        frame = gdb.newest_frame()
         self.currentCallContext = None
         while i < limit and frame:
             with OutputSafer(self):
                 name = frame.name()
-                functionName = "??" if name is None else name
-                fileName = ""
-                objfile = ""
-                symtab = ""
+                functionName = '??' if name is None else name
+                fileName = ''
+                objfile = ''
+                symtab = ''
                 pc = frame.pc()
                 sal = frame.find_sal()
                 line = -1
@@ -1059,13 +1301,13 @@ class Dumper(DumperBase):
                         objfile = fromNativePath(symtab.objfile.filename)
                         fullname = symtab.fullname()
                         if fullname is None:
-                            fileName = ""
+                            fileName = ''
                         else:
                             fileName = fromNativePath(fullname)
 
-                if self.nativeMixed and functionName == "qt_qmlDebugMessageAvailable":
+                if self.nativeMixed and functionName == 'qt_qmlDebugMessageAvailable':
                     interpreterStack = self.extractInterpreterStack()
-                    #print("EXTRACTED INTEPRETER STACK: %s" % interpreterStack)
+                    #print('EXTRACTED INTEPRETER STACK: %s' % interpreterStack)
                     for interpreterFrame in interpreterStack.get('frames', []):
                         function = interpreterFrame.get('function', '')
                         fileName = interpreterFrame.get('file', '')
@@ -1075,7 +1317,7 @@ class Dumper(DumperBase):
 
                         self.put(('frame={function="%s",file="%s",'
                                  'line="%s",language="%s",context="%s"}')
-                            % (function, fileName, lineNumber, language, context))
+                            % (function, self.hexencode(fileName), lineNumber, language, context))
 
                     if False and self.isInternalInterpreterFrame(functionName):
                         frame = frame.older()
@@ -1100,7 +1342,7 @@ class Dumper(DumperBase):
             def __init__(self, dumper, args):
                 self.dumper = dumper
                 self.args = args
-                spec = "qt_qmlDebugConnectorOpen"
+                spec = 'qt_qmlDebugConnectorOpen'
                 super(Resolver, self).\
                     __init__(spec, gdb.BP_BREAKPOINT, internal=True, temporary=False)
 
@@ -1112,16 +1354,16 @@ class Dumper(DumperBase):
         self.interpreterBreakpointResolvers.append(Resolver(self, args))
 
     def exitGdb(self, _):
-        gdb.execute("quit")
+        gdb.execute('quit')
 
     def reportResult(self, msg, args):
         print(msg)
 
     def profile1(self, args):
-        """Internal profiling"""
+        '''Internal profiling'''
         import tempfile
         import cProfile
-        tempDir = tempfile.gettempdir() + "/bbprof"
+        tempDir = tempfile.gettempdir() + '/bbprof'
         cProfile.run('theDumper.fetchVariables(%s)' % args, tempDir)
         import pstats
         pstats.Stats(tempDir).sort_stats('time').print_stats()
@@ -1150,7 +1392,7 @@ class CliDumper(Dumper):
     def putNumChild(self, numchild):
         pass
 
-    def putOriginalAddress(self, value):
+    def putOriginalAddress(self, address):
         pass
 
     def fetchVariables(self, args):
@@ -1183,7 +1425,7 @@ theDumper = Dumper()
 def threadnames(arg):
     return theDumper.threadnames(int(arg))
 
-registerCommand("threadnames", threadnames)
+registerCommand('threadnames', threadnames)
 
 #######################################################################
 #
@@ -1193,12 +1435,12 @@ registerCommand("threadnames", threadnames)
 
 class InterpreterMessageBreakpoint(gdb.Breakpoint):
     def __init__(self):
-        spec = "qt_qmlDebugMessageAvailable"
+        spec = 'qt_qmlDebugMessageAvailable'
         super(InterpreterMessageBreakpoint, self).\
             __init__(spec, gdb.BP_BREAKPOINT, internal=True)
 
     def stop(self):
-        print("Interpreter event received.")
+        print('Interpreter event received.')
         return theDumper.handleInterpreterMessage()
 
-InterpreterMessageBreakpoint()
+#InterpreterMessageBreakpoint()

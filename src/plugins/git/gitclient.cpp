@@ -722,13 +722,16 @@ void GitClient::requestReload(const QString &documentId, const QString &source,
 
     IDocument *document = DiffEditorController::findOrCreateDocument(documentId, title);
     QTC_ASSERT(document, return);
-    DiffEditorController *controller = factory(document);
-    QTC_ASSERT(controller, return);
+    DiffEditorController *controller = DiffEditorController::controller(document);
+    if (!controller) {
+        controller = factory(document);
+        QTC_ASSERT(controller, return);
 
-    connect(controller, &DiffEditorController::chunkActionsRequested,
-            this, &GitClient::slotChunkActionsRequested, Qt::DirectConnection);
-    connect(controller, &DiffEditorController::requestInformationForCommit,
-            this, &GitClient::branchesForCommit);
+        connect(controller, &DiffEditorController::chunkActionsRequested,
+                this, &GitClient::slotChunkActionsRequested, Qt::DirectConnection);
+        connect(controller, &DiffEditorController::requestInformationForCommit,
+                this, &GitClient::branchesForCommit);
+    }
 
     VcsBasePlugin::setSource(document, sourceCopy);
     EditorManager::activateEditorForDocument(document);
@@ -2226,7 +2229,7 @@ FileName GitClient::gitBinDirectory()
 
     // Is 'git\cmd' in the path (folder containing .bats)?
     QString path = QFileInfo(git).absolutePath();
-    // Git for Windows (msysGit) has git and gitk redirect executables in {setup dir}/cmd
+    // Git for Windows has git and gitk redirect executables in {setup dir}/cmd
     // and the real binaries are in {setup dir}/bin. If cmd is configured in PATH
     // or in Git settings, return bin instead.
     if (HostOsInfo::isWindowsHost()
@@ -2472,7 +2475,7 @@ bool GitClient::addAndCommit(const QString &repositoryDirectory,
             filesToAdd.append(file);
 
         if ((state & StagedFile) && !checked) {
-            if (state & (ModifiedFile | AddedFile | DeletedFile)) {
+            if (state & (ModifiedFile | AddedFile | DeletedFile | TypeChangedFile)) {
                 filesToReset.append(file);
             } else if (state & (RenamedFile | CopiedFile)) {
                 const QString newFile = file.mid(file.indexOf(renameSeparator) + renameSeparator.count());
@@ -2482,7 +2485,7 @@ bool GitClient::addAndCommit(const QString &repositoryDirectory,
             QTC_ASSERT(false, continue); // There should not be unmerged files when committing!
         }
 
-        if (state == ModifiedFile && checked) {
+        if ((state == ModifiedFile || state == TypeChangedFile) && checked) {
             filesToReset.removeAll(file);
             filesToAdd.append(file);
         } else if (state == AddedFile && checked) {
@@ -2698,7 +2701,8 @@ void GitClient::synchronousAbortCommand(const QString &workingDir, const QString
     }
 
     const SynchronousProcessResponse resp = vcsFullySynchronousExec(
-                workingDir, { abortCommand, "--abort" }, VcsCommand::ExpectRepoChanges);
+                workingDir, { abortCommand, "--abort" },
+                VcsCommand::ExpectRepoChanges | VcsCommand::ShowSuccessMessage);
     VcsOutputWindow::append(resp.stdOut());
 }
 
@@ -2988,7 +2992,7 @@ QString GitClient::readGitVar(const QString &workingDirectory, const QString &co
 
 QString GitClient::readOneLine(const QString &workingDirectory, const QStringList &arguments) const
 {
-    // msysGit always uses UTF-8 for configuration:
+    // Git for Windows always uses UTF-8 for configuration:
     // https://github.com/msysgit/msysgit/wiki/Git-for-Windows-Unicode-Support#convert-config-files
     static QTextCodec *codec = HostOsInfo::isWindowsHost()
             ? QTextCodec::codecForName("UTF-8")

@@ -25,14 +25,18 @@
 
 #include "googletest.h"
 
+#include <clangclock.h>
 #include <clangtranslationunitupdater.h>
 
 #include <clang-c/Index.h>
 
+using ClangBackEnd::Clock;
+using ClangBackEnd::TimePoint;
 using ClangBackEnd::TranslationUnitUpdater;
 using ClangBackEnd::TranslationUnitUpdateInput;
 using ClangBackEnd::TranslationUnitUpdateResult;
 
+using testing::Eq;
 using testing::Gt;
 
 namespace {
@@ -42,7 +46,8 @@ class TranslationUnitUpdater : public ::testing::Test
 protected:
     void TearDown() override;
 
-    ::TranslationUnitUpdater createUpdater(const TranslationUnitUpdateInput &input);
+    ::TranslationUnitUpdater createUpdater(const TranslationUnitUpdateInput &input,
+                                           const Utf8String &translationUnitId = Utf8String());
 
     enum ReparseMode { SetReparseNeeded, DoNotSetReparseNeeded };
     TranslationUnitUpdateInput createInput(ReparseMode reparseMode = DoNotSetReparseNeeded);
@@ -61,7 +66,7 @@ TEST_F(TranslationUnitUpdater, ParsesIfNeeded)
     TranslationUnitUpdateResult result = updater.update(::TranslationUnitUpdater::UpdateMode::AsNeeded);
 
     ASSERT_TRUE(cxTranslationUnit);
-    ASSERT_FALSE(result.reparsed);
+    ASSERT_FALSE(result.hasReparsed());
 }
 
 TEST_F(TranslationUnitUpdater, ReparsesIfNeeded)
@@ -70,17 +75,27 @@ TEST_F(TranslationUnitUpdater, ReparsesIfNeeded)
 
     TranslationUnitUpdateResult result = updater.update(::TranslationUnitUpdater::UpdateMode::AsNeeded);
 
-    ASSERT_TRUE(result.reparsed);
+    ASSERT_TRUE(result.hasReparsed());
+}
+
+TEST_F(TranslationUnitUpdater, PropagatesTranslationUnitId)
+{
+    const Utf8String translationUnitId = Utf8StringLiteral("myId");
+    ::TranslationUnitUpdater updater = createUpdater(createInput(SetReparseNeeded), translationUnitId);
+
+    TranslationUnitUpdateResult result = updater.update(::TranslationUnitUpdater::UpdateMode::AsNeeded);
+
+    ASSERT_THAT(result.translationUnitId, Eq(translationUnitId));
 }
 
 TEST_F(TranslationUnitUpdater, UpdatesParseTimePoint)
 {
     ::TranslationUnitUpdater updater = createUpdater(createInput());
-    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    const TimePoint now = Clock::now();
 
     TranslationUnitUpdateResult result = updater.update(::TranslationUnitUpdater::UpdateMode::AsNeeded);
 
-    ASSERT_TRUE(result.parseTimePointIsSet);
+    ASSERT_TRUE(result.hasParsed());
     ASSERT_THAT(result.parseTimePoint, Gt(now));
 }
 
@@ -92,8 +107,8 @@ TEST_F(TranslationUnitUpdater, NotUpdatingParseTimePointForReparseOnly)
     ::TranslationUnitUpdater reparseUpdater = createUpdater(createInput(SetReparseNeeded));
     result = reparseUpdater.update(::TranslationUnitUpdater::UpdateMode::AsNeeded);
 
-    ASSERT_TRUE(result.reparsed);
-    ASSERT_FALSE(result.parseTimePointIsSet);
+    ASSERT_TRUE(result.hasReparsed());
+    ASSERT_FALSE(result.hasParsed());
 }
 
 TEST_F(TranslationUnitUpdater, UpdatesDependendOnFilesOnParse)
@@ -111,9 +126,10 @@ void TranslationUnitUpdater::TearDown()
 }
 
 ::TranslationUnitUpdater
-TranslationUnitUpdater::createUpdater(const TranslationUnitUpdateInput &input)
+TranslationUnitUpdater::createUpdater(const TranslationUnitUpdateInput &input,
+                                      const Utf8String &translationUnitId)
 {
-    return ::TranslationUnitUpdater(cxIndex, cxTranslationUnit, input);
+    return ::TranslationUnitUpdater(translationUnitId, cxIndex, cxTranslationUnit, input);
 }
 
 TranslationUnitUpdateInput

@@ -249,9 +249,12 @@ void GdbMi::parseList(const QChar *&from, const QChar *to)
         }
         GdbMi child;
         child.parseResultOrValue(from, to);
-        if (child.isValid())
+        if (child.isValid()) {
             m_children.push_back(child);
-        skipCommas(from, to);
+            skipCommas(from, to);
+        } else {
+            ++from;
+        }
     }
 }
 
@@ -819,9 +822,9 @@ QString DebuggerCommand::argsToString() const
 
 DebuggerEncoding::DebuggerEncoding(const QString &data)
 {
-    const QStringList l = data.split(':');
+    const QVector<QStringRef> l = data.splitRef(QLatin1Char(':'));
 
-    const QString &t = l.at(0);
+    const QStringRef &t = l.at(0);
     if (t == "latin1") {
         type = HexEncodedLatin1;
         size = 1;

@@ -583,7 +583,7 @@ static std::function<bool(const Kit *)> cdbMatcher(char wordWidth = 0)
 {
     return [wordWidth](const Kit *k) -> bool {
         if (DebuggerKitInformation::engineType(k) != CdbEngineType
-            || !DebuggerKitInformation::isValidDebugger(k)) {
+            || DebuggerKitInformation::configurationErrors(k)) {
             return false;
         }
         if (wordWidth)
@@ -1125,13 +1125,13 @@ static Kit *guessKitFromParameters(const DebuggerRunParameters &rp)
         // Try exact abis.
         kit = KitManager::find(KitMatcher([abis](const Kit *k) -> bool {
             const Abi tcAbi = ToolChainKitInformation::targetAbi(k);
-            return abis.contains(tcAbi) && DebuggerKitInformation::isValidDebugger(k);
+            return abis.contains(tcAbi) && !DebuggerKitInformation::configurationErrors(k);
         }));
         if (!kit) {
             // Or something compatible.
             kit = KitManager::find(KitMatcher([abis](const Kit *k) -> bool {
                 const Abi tcAbi = ToolChainKitInformation::targetAbi(k);
-                return DebuggerKitInformation::isValidDebugger(k)
+                return !DebuggerKitInformation::configurationErrors(k)
                         && Utils::contains(abis, [tcAbi](const Abi &a) { return a.isCompatibleWith(tcAbi); });
             }));
         }
@@ -1332,7 +1332,8 @@ bool DebuggerPluginPrivate::initialize(const QStringList &arguments,
     m_logWindow->setObjectName(QLatin1String(DOCKWIDGET_OUTPUT));
 
     m_breakHandler = new BreakHandler;
-    m_breakView = new BaseTreeView;;
+    m_breakView = new BaseTreeView;
+    m_breakView->setIconSize(QSize(10, 10));
     m_breakView->setWindowIcon(Icons::BREAKPOINTS.icon());
     m_breakView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     connect(action(UseAddressInBreakpointsView), &QAction::toggled,
@@ -1359,6 +1360,7 @@ bool DebuggerPluginPrivate::initialize(const QStringList &arguments,
 
     m_stackView = new StackTreeView;
     m_stackView->setSettings(settings, "Debugger.StackView");
+    m_stackView->setIconSize(QSize(10, 10));
     m_stackWindow = addSearch(m_stackView, tr("Stack"), DOCKWIDGET_STACK);
 
     m_sourceFilesView = new BaseTreeView;
@@ -1372,6 +1374,7 @@ bool DebuggerPluginPrivate::initialize(const QStringList &arguments,
     m_threadsView = new BaseTreeView;
     m_threadsView->setSortingEnabled(true);
     m_threadsView->setSettings(settings, "Debugger.ThreadsView");
+    m_threadsView->setIconSize(QSize(10, 10));
     m_threadsWindow = addSearch(m_threadsView, tr("Threads"), DOCKWIDGET_THREADS);
 
     m_returnView = new WatchTreeView(ReturnType); // No settings.
@@ -1782,7 +1785,7 @@ bool DebuggerPluginPrivate::initialize(const QStringList &arguments,
     m_modeWindow = createModeWindow(Constants::MODE_DEBUG, m_mainWindow);
     m_mode->setWidget(m_modeWindow);
 
-    m_plugin->addAutoReleasedObject(new DebugModeContext(m_mainWindow));
+    m_plugin->addAutoReleasedObject(new DebugModeContext(m_modeWindow));
 
     m_plugin->addObject(m_mode);
 
@@ -3605,6 +3608,11 @@ void selectPerspective(const QByteArray &perspectiveId)
         return;
     ModeManager::activateMode(MODE_DEBUG);
     dd->m_mainWindow->restorePerspective(perspectiveId);
+}
+
+QByteArray currentPerspective()
+{
+    return dd->m_mainWindow->currentPerspective();
 }
 
 QWidget *mainWindow()

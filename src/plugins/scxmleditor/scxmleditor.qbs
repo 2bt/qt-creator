@@ -72,16 +72,12 @@ QtcPlugin {
             "colorpicker.ui",
             "colorsettings.ui",
             "colorthemedialog.ui",
-            "navigator.ui",
             "navigatorslider.ui",
             "search.ui",
-            "shapegroupwidget.ui",
             "shapestoolbox.ui",
-            "stateproperties.ui",
             "stateview.ui",
             "statistics.ui",
             "statisticsdialog.ui",
-            "structure.ui",
         ]
     }
 
@@ -96,9 +92,6 @@ QtcPlugin {
             "tableview.cpp", "tableview.h",
             "warning.cpp", "warning.h",
             "warningmodel.cpp", "warningmodel.h",
-
-            "errorwidget.ui",
-            "outputtabwidget.ui",
         ]
     }
 

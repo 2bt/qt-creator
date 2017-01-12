@@ -513,11 +513,12 @@ void MainWindow::registerDefaultActions()
     cmd->setDefaultKeySequence(QKeySequence::New);
     mfile->addAction(cmd, Constants::G_FILE_NEW);
     connect(m_newAction, &QAction::triggered, this, [this]() {
-        ICore::showNewItemDialog(tr("New File or Project", "Title of dialog"),
-                                 IWizardFactory::allWizardFactories(), QString());
-    });
-    connect(ICore::instance(), &ICore::newItemDialogRunningChanged, m_newAction, [this]() {
-        m_newAction->setEnabled(!ICore::isNewItemDialogRunning());
+        if (!ICore::isNewItemDialogRunning()) {
+            ICore::showNewItemDialog(tr("New File or Project", "Title of dialog"),
+                                     IWizardFactory::allWizardFactories(), QString());
+        } else {
+            ICore::raiseWindow(ICore::newItemDialog());
+        }
     });
 
     // Open Action
@@ -1070,12 +1071,8 @@ void MainWindow::aboutToShowRecentFiles()
     for (int i = 0; i < recentFiles.count(); ++i) {
         const DocumentManager::RecentFile file = recentFiles[i];
 
-        const int acceleratorKey = i + 1;
-        const QString textPattern = acceleratorKey < 10 ? QStringLiteral("&%1: %2") : QStringLiteral("%1: %2");
         const QString filePath = QDir::toNativeSeparators(withTildeHomePath(file.first));
-        const QString actionText = HostOsInfo::isMacHost()
-                ? filePath
-                : textPattern.arg(acceleratorKey).arg(filePath);
+        const QString actionText = ActionManager::withNumberAccelerator(filePath, i + 1);
         QAction *action = menu->addAction(actionText);
         connect(action, &QAction::triggered, this, [file] {
             EditorManager::openEditor(file.first, file.second);
@@ -1101,8 +1098,11 @@ void MainWindow::aboutQtCreator()
         m_versionDialog = new VersionDialog(this);
         connect(m_versionDialog, &QDialog::finished,
                 this, &MainWindow::destroyVersionDialog);
+        ICore::registerWindow(m_versionDialog, Context("Core.VersionDialog"));
+        m_versionDialog->show();
+    } else {
+        ICore::raiseWindow(m_versionDialog);
     }
-    m_versionDialog->show();
 }
 
 void MainWindow::destroyVersionDialog()
@@ -1155,18 +1155,11 @@ void MainWindow::restoreWindowState()
     QSettings *settings = PluginManager::settings();
     settings->beginGroup(QLatin1String(settingsGroup));
     if (!restoreGeometry(settings->value(QLatin1String(windowGeometryKey)).toByteArray()))
-        resize(1008, 700); // size without window decoration
+        resize(1260, 700); // size without window decoration
     restoreState(settings->value(QLatin1String(windowStateKey)).toByteArray());
     settings->endGroup();
     show();
     m_statusBarManager->restoreSettings();
-}
-
-void MainWindow::newItemDialogFinished()
-{
-    m_newAction->setEnabled(true);
-    // fire signal when the dialog is actually destroyed
-    QTimer::singleShot(0, this, &MainWindow::newItemDialogRunningChanged);
 }
 
 } // namespace Internal

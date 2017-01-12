@@ -198,7 +198,7 @@ def invokeMenuItem(menu, item, *subItems):
     itemObject = waitForObjectItem(objectMap.realName(menuObject), item)
     waitFor("itemObject.enabled", 2000)
     activateItem(itemObject)
-    numberedPrefix = "&?\\d+: "
+    numberedPrefix = "(&\\d \| )?"
     for subItem in subItems:
         sub = itemObject.menu()
         waitFor("sub.visible", 1000)
@@ -209,7 +209,7 @@ def invokeMenuItem(menu, item, *subItems):
             for i in range(actions.count()):
                 current = actions.at(i)
                 nonPrefix = subItem[len(numberedPrefix):]
-                matcher = re.match("(%s)(.*)" % numberedPrefix, str(current.text))
+                matcher = re.match("%s(.*)" % numberedPrefix, str(current.text))
                 if matcher and matcher.group(2) == nonPrefix:
                     itemObject = current
                     activateItem(itemObject)
@@ -647,6 +647,8 @@ def openVcsLog():
                                  "window=':Qt Creator_Core::Internal::MainWindow'}", 2000)
         if className(foundObj) != 'Core::OutputWindow':
             raise Exception("Found derived class, but not a pure QPlainTextEdit.")
+        waitForObject("{text='Version Control' type='QLabel' unnamed='1' visible='1' "
+                      "window=':Qt Creator_Core::Internal::MainWindow'}", 2000)
     except:
         invokeMenuItem("Window", "Output Panes", "Version Control")
 

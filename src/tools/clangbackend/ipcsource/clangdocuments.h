@@ -32,6 +32,7 @@
 
 #include <QVector>
 
+#include <functional>
 #include <vector>
 
 namespace ClangBackEnd {
@@ -45,7 +46,7 @@ public:
     Documents(ProjectParts &projectParts, UnsavedFiles &unsavedFiles);
 
     std::vector<Document> create(const QVector<FileContainer> &fileContainers);
-    void update(const QVector<FileContainer> &fileContainers);
+    std::vector<Document> update(const QVector<FileContainer> &fileContainers);
     void remove(const QVector<FileContainer> &fileContainers);
 
     void setUsedByCurrentEditor(const Utf8String &filePath);
@@ -57,6 +58,9 @@ public:
     bool hasDocumentWithFilePath(const Utf8String &filePath) const;
 
     const std::vector<Document> &documents() const;
+    using IsMatchingDocument = std::function<bool(const Document &document)>;
+    const std::vector<Document> filtered(const IsMatchingDocument &isMatchingDocument) const;
+    std::vector<Document> dirtyAndVisibleButNotCurrentDocuments() const;
 
     UnsavedFiles unsavedFiles() const;
 
@@ -72,7 +76,7 @@ public:
 
 private:
     Document createDocument(const FileContainer &fileContainer);
-    void updateDocument(const FileContainer &fileContainer);
+    std::vector<Document> updateDocument(const FileContainer &fileContainer);
     std::vector<Document>::iterator findDocument(const FileContainer &fileContainer);
     std::vector<Document> findAllDocumentsWithFilePath(const Utf8String &filePath);
     std::vector<Document>::const_iterator findDocument(const Utf8String &filePath, const Utf8String &projectPartId) const;

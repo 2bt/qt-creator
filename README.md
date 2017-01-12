@@ -6,22 +6,26 @@ Qt Creator is a cross-platform IDE for development with the Qt framework.
 
 The standalone binary packages support the following platforms:
 
-Windows 7 or later
-(K)Ubuntu Linux 14.04 (64-bit) or later
-macOS 10.8 or later
+* Windows 7 or later
+* (K)Ubuntu Linux 14.04 (64-bit) or later
+* macOS 10.8 or later
 
 ## Compiling Qt Creator
 
 Prerequisites:
 
 * Qt 5.6.0 or later
+* Qt WebEngine module for QtWebEngine based help viewer
 * On Windows:
     * ActiveState Active Perl
     * MinGW with g++ 4.8 or Visual Studio 2015 or later
     * jom
 * On Mac OS X: latest Xcode
 * On Linux: g++ 4.8 or later
-* LLVM 3.8.0 or later (optional, needed for the Clang Code Model)
+* LLVM/Clang 3.9.0 or later (optional, needed for the Clang Code Model, see the
+  section "Get LLVM/Clang for the Clang Code Model")
+    * CMake (only for manual builds of LLVM/Clang)
+* Qbs 1.7.x (optional, sources also contain Qbs itself)
 
 The installed toolchains have to match the one Qt was compiled with.
 
@@ -29,6 +33,8 @@ You can build Qt Creator with
 
     # Optional, needed for the Clang Code Model:
     export LLVM_INSTALL_DIR=/path/to/llvm (or "set" on Windows)
+    # Optional, needed to let the QbsProjectManager plugin use system Qbs:
+    export QBS_INSTALL_DIR=/path/to/qbs
 
     cd $SOURCE_DIRECTORY
     qmake -r
@@ -51,7 +57,7 @@ For detailed information on the supported compilers, see
        plan to contribute to Qt Creator, you should compile your changes with
        both compilers.
 
-   2.  Install msysGit from <https://msysgit.github.io/>. If you plan to
+   2.  Install Git for Windows from <https://git-for-windows.github.io/>. If you plan to
        use the MinGW compiler suite, do not choose to put git in the
        default path of Windows command prompts. For more information, see
        step 9.
@@ -118,11 +124,16 @@ For detailed information on the supported compilers, see
        command...` error. If a `sh.exe` is found, the compile process will fail.
        You have to remove it from the path.
 
-  10.  To enable the Clang-based code model: Install Clang (>= version 3.8.0)
-       and set the environment variable LLVM_INSTALL_DIR to point to the
-       installation location.
+   10. To make use of the Clang Code Model:
 
-  11.  You are now ready to configure and build Qt and Qt Creator.
+       * Install LLVM/Clang - see the section "Get LLVM/Clang for the Clang
+         Code Model".
+       * Set the environment variable LLVM_INSTALL_DIR to the LLVM/Clang
+         installation directory.
+       * When you launch Qt Creator, activate the Clang Code Model plugin as
+         described in doc/src/editors/creator-clang-codemodel.qdoc.
+
+   11. You are now ready to configure and build Qt and Qt Creator.
        Please see <https://wiki.qt.io/Building_Qt_5_from_Git> for
        recommended configure-options for Qt 5.
        To use MinGW, open the the shell prompt and enter:
@@ -188,6 +199,58 @@ Thus, if you want to work on Qt Creator using Qt Creator, you need a
 separate build of it. We recommend using a separate, release-built version
 of Qt and Qt Creator to work on a debug-built version of Qt and Qt Creator
 or using shadow builds.
+
+## Get LLVM/Clang for the Clang Code Model
+
+The Clang Code Model depends on the LLVM/Clang libraries. The currently
+supported LLVM/Clang version is 3.9.
+
+### Prebuilt LLVM/Clang packages
+
+Prebuilt packages of LLVM/Clang can be downloaded from
+
+    https://download.qt.io/development_releases/prebuilt/libclang/
+
+This should be your preferred option because you will use the version that is
+shipped together with Qt Creator. In addition, the packages for Windows are
+faster due to profile-guided optimization. If the prebuilt packages do not
+match your configuration, you need to build LLVM/Clang manually.
+
+### Building LLVM/Clang manually
+
+You need to install CMake in order to build LLVM/Clang.
+
+Build LLVM/Clang by roughly following the instructions at
+http://llvm.org/docs/GettingStarted.html#git-mirror:
+
+   1. Clone LLVM and switch to a suitable branch
+
+          git clone http://llvm.org/git/llvm.git
+          cd llvm
+          git checkout release_39
+
+   2. Clone Clang into llvm/tools/clang and switch to a suitable branch
+
+          cd tools
+          git clone http://llvm.org/git/clang.git
+          cd clang
+          git checkout release_39
+
+   3. Build and install LLVM/Clang
+
+          cd ../../..
+          mkdir build
+          cd build
+
+      For Linux/macOS:
+
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=<installation location> -DLLVM_ENABLE_RTTI=ON ..\llvm
+          make install
+
+      For Windows:
+
+          cmake -G "NMake Makefiles JOM" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=<installation location> -DLLVM_ENABLE_RTTI=ON ..\llvm
+          jom install
 
 ## Third-party Components
 

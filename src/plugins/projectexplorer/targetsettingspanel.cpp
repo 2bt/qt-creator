@@ -26,20 +26,16 @@
 #include "targetsettingspanel.h"
 
 #include "buildconfiguration.h"
-#include "buildinfo.h"
 #include "buildmanager.h"
 #include "buildsettingspropertiespage.h"
 #include "ipotentialkit.h"
 #include "kit.h"
 #include "kitmanager.h"
-#include "kitoptionspage.h"
 #include "panelswidget.h"
 #include "project.h"
 #include "projectexplorer.h"
-#include "projectimporter.h"
-#include "projecttree.h"
+#include "projectexplorericons.h"
 #include "projectwindow.h"
-#include "propertiespanel.h"
 #include "runsettingspropertiespage.h"
 #include "session.h"
 #include "target.h"
@@ -49,8 +45,6 @@
 #include <coreplugin/coreconstants.h>
 #include <coreplugin/modemanager.h>
 
-#include <extensionsystem/pluginmanager.h>
-
 #include <utils/algorithm.h>
 #include <utils/qtcassert.h>
 #include <utils/treemodel.h>
@@ -59,7 +53,6 @@
 #include <QCoreApplication>
 #include <QApplication>
 #include <QDialogButtonBox>
-#include <QFileDialog>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -133,11 +126,11 @@ TargetSetupPageWrapper::TargetSetupPageWrapper(Project *project)
     : m_project(project)
 {
     m_targetSetupPage = new TargetSetupPage(this);
-    m_targetSetupPage->setProjectImporter(project->createProjectImporter());
     m_targetSetupPage->setUseScrollArea(false);
     m_targetSetupPage->setProjectPath(project->projectFilePath().toString());
     m_targetSetupPage->setRequiredKitMatcher(project->requiredKitMatcher());
     m_targetSetupPage->setPreferredKitMatcher(project->preferredKitMatcher());
+    m_targetSetupPage->setProjectImporter(project->projectImporter());
     m_targetSetupPage->initializePage();
     m_targetSetupPage->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     updateNoteText();
@@ -210,23 +203,22 @@ class TargetGroupItemPrivate : public QObject
 
 public:
     TargetGroupItemPrivate(TargetGroupItem *q, Project *project);
-    ~TargetGroupItemPrivate() { /*delete m_importer;*/ }
+    ~TargetGroupItemPrivate();
 
     void handleRemovedKit(Kit *kit);
     void handleAddedKit(Kit *kit);
+    void handleUpdatedKit(Kit *kit);
 
     void handleTargetAdded(Target *target);
     void handleTargetRemoved(Target *target);
     void handleTargetChanged(Target *target);
 
-    void importTarget(const Utils::FileName &path);
     void ensureWidget();
     void rebuildContents();
 
     TargetGroupItem *q;
     QString m_displayName;
-    QPointer<Project> m_project;
-    ProjectImporter *m_importer;
+    Project *m_project;
 
     QPointer<QWidget> m_noKitLabel;
     QPointer<QWidget> m_configurePage;
@@ -257,58 +249,27 @@ void TargetGroupItemPrivate::ensureWidget()
 
     if (!m_configurePage) {
         auto panelsWidget = new PanelsWidget;
-        auto panel = new PropertiesPanel;
-        panel->setDisplayName(tr("Configure Project"));
         auto widget = new TargetSetupPageWrapper(m_project);
-        panel->setWidget(widget);
-        panel->setIcon(QIcon(":/projectexplorer/images/unconfigured.png"));
-        panelsWidget->addPropertiesPanel(panel);
+        panelsWidget->addPropertiesPanel(tr("Configure Project"),
+                                         QIcon(":/projectexplorer/images/unconfigured.png"),
+                                         widget);
         panelsWidget->setFocusProxy(widget);
         m_configurePage = panelsWidget;
     }
 
     if (!m_configuredPage) {
         auto panelsWidget = new PanelsWidget;
-        auto panel = new PropertiesPanel;
-        panel->setDisplayName(tr("Configure Project"));
         auto widget = new QWidget;
         auto label = new QLabel("This project is already configured.");
         auto layout = new QVBoxLayout(widget);
         layout->setMargin(0);
         layout->addWidget(label);
         layout->addStretch(10);
-        panel->setWidget(widget);
-        panel->setIcon(QIcon(":/projectexplorer/images/unconfigured.png"));
-        panelsWidget->addPropertiesPanel(panel);
+        panelsWidget->addPropertiesPanel(tr("Configure Project"),
+                                         QIcon(":/projectexplorer/images/unconfigured.png"),
+                                         widget);
         m_configuredPage = panelsWidget;
     }
-}
-
-void TargetGroupItemPrivate::importTarget(const Utils::FileName &path)
-{
-    if (!m_importer)
-        return;
-
-    Target *target = nullptr;
-    BuildConfiguration *bc = nullptr;
-    QList<BuildInfo *> toImport = m_importer->import(path, false);
-    foreach (BuildInfo *info, toImport) {
-        target = m_project->target(info->kitId);
-        if (!target) {
-            target = m_project->createTarget(KitManager::find(info->kitId));
-            m_project->addTarget(target);
-        }
-        bc = info->factory()->create(target, info);
-        QTC_ASSERT(bc, continue);
-        target->addBuildConfiguration(bc);
-    }
-
-    SessionManager::setActiveTarget(m_project, target, SetActive::Cascade);
-
-    if (target && bc)
-        SessionManager::setActiveBuildConfiguration(target, bc, SetActive::Cascade);
-
-    qDeleteAll(toImport);
 }
 
 //
@@ -319,6 +280,8 @@ class TargetItem : public TypedTreeItem<TreeItem, TargetGroupItem>
     Q_DECLARE_TR_FUNCTIONS(TargetSettingsPanelWidget)
 
 public:
+    enum { DefaultPage = 0 }; // Build page.
+
     TargetItem(Project *project, Id kitId)
         : m_project(project), m_kitId(kitId)
     {
@@ -338,20 +301,6 @@ public:
         return Qt::ItemFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
     }
 
-    static QIcon enableKitIcon(const Kit &kit)
-    {
-        static const QIcon overlay = Utils::Icons::ENABLE_KIT_OVERLAY.icon();
-        const QSize iconSize(16, 16);
-        const QRect iconRect(QPoint(), iconSize);
-        QPixmap result(iconSize * qApp->devicePixelRatio());
-        result.fill(Qt::transparent);
-        result.setDevicePixelRatio(qApp->devicePixelRatio());
-        QPainter p(&result);
-        kit.icon().paint(&p, iconRect, Qt::AlignCenter, QIcon::Disabled);
-        overlay.paint(&p, iconRect);
-        return result;
-    }
-
     QVariant data(int column, int role) const override
     {
         switch (role) {
@@ -365,11 +314,11 @@ public:
             const Kit *k = KitManager::find(m_kitId);
             QTC_ASSERT(k, return QVariant());
             if (!isEnabled())
-                return enableKitIcon(*k);
+                return kitIconWithOverlay(*k, IconOverlay::Add);
             if (!k->isValid())
-                return Utils::Icons::ERROR.icon();
+                return kitIconWithOverlay(*k, IconOverlay::Error);
             if (k->hasWarning())
-                return Utils::Icons::WARNING.icon();
+                return kitIconWithOverlay(*k, IconOverlay::Warning);
             return k->icon();
         }
 
@@ -425,10 +374,16 @@ public:
         if (role == ItemActivatedDirectlyRole) {
             QTC_ASSERT(!data.isValid(), return false);
             if (!isEnabled()) {
+                m_currentChild = DefaultPage;
                 Kit *k = KitManager::find(m_kitId);
                 m_project->addTarget(m_project->createTarget(k));
             } else {
+                // Go to Run page, when on Run previously etc.
+                TargetItem *previousItem = parent()->currentTargetItem();
+                m_currentChild = previousItem ? previousItem->m_currentChild : DefaultPage;
                 SessionManager::setActiveTarget(m_project, target(), SetActive::Cascade);
+                parent()->setData(column, QVariant::fromValue(static_cast<TreeItem *>(this)),
+                                  ItemActivatedFromBelowRole);
             }
             return true;
         }
@@ -509,24 +464,53 @@ public:
         } else {
             copyMenu->setEnabled(false);
         }
-
-        menu->addSeparator();
-
-        QAction *manageKits = menu->addAction(tr("Manage Kits"));
-        QObject::connect(manageKits, &QAction::triggered, menu, [this] {
-            KitOptionsPage *page = ExtensionSystem::PluginManager::getObject<KitOptionsPage>();
-            if (page)
-                page->showKit(KitManager::find(m_kitId));
-            ICore::showOptionsDialog(Constants::KITS_SETTINGS_PAGE_ID, ICore::mainWindow());
-        });
     }
 
     bool isEnabled() const { return target() != 0; }
 
 public:
-    Project *m_project; // Not owned.
+    QPointer<Project> m_project; // Not owned.
     Id m_kitId;
-    int m_currentChild = 1; // Use run page by default.
+    int m_currentChild = DefaultPage; // Use run page by default.
+
+private:
+    enum class IconOverlay {
+        Add,
+        Warning,
+        Error
+    };
+
+    static QIcon kitIconWithOverlay(const Kit &kit, IconOverlay overlayType)
+    {
+        QIcon overlayIcon;
+        switch (overlayType) {
+        case IconOverlay::Add: {
+            static const QIcon add = Utils::Icons::OVERLAY_ADD.icon();
+            overlayIcon = add;
+            break;
+        }
+        case IconOverlay::Warning: {
+            static const QIcon warning = Utils::Icons::OVERLAY_WARNING.icon();
+            overlayIcon = warning;
+            break;
+        }
+        case IconOverlay::Error: {
+            static const QIcon err = Utils::Icons::OVERLAY_ERROR.icon();
+            overlayIcon = err;
+            break;
+        }
+        }
+        const QSize iconSize(16, 16);
+        const QRect iconRect(QPoint(), iconSize);
+        QPixmap result(iconSize * qApp->devicePixelRatio());
+        result.fill(Qt::transparent);
+        result.setDevicePixelRatio(qApp->devicePixelRatio());
+        QPainter p(&result);
+        kit.icon().paint(&p, iconRect, Qt::AlignCenter,
+                         overlayType == IconOverlay::Add ? QIcon::Disabled : QIcon::Normal);
+        overlayIcon.paint(&p, iconRect);
+        return result;
+    }
 };
 
 //
@@ -577,8 +561,22 @@ public:
         case ActiveItemRole:
             return QVariant::fromValue<TreeItem *>(const_cast<BuildOrRunItem *>(this));
 
-        case Qt::DecorationRole:
-            return Utils::Icons::EMPTY14.icon();
+        case KitIdRole:
+            return m_kitId.toSetting();
+
+        case Qt::DecorationRole: {
+            switch (m_subIndex) {
+            case BuildPage: {
+                static const QIcon buildIcon = ProjectExplorer::Icons::BUILD_SMALL.icon();
+                return buildIcon;
+            }
+            case RunPage: {
+                static const QIcon runIcon = Utils::Icons::RUN_SMALL.icon();
+                return runIcon;
+            }
+            }
+            break;
+        }
 
         default:
             break;
@@ -605,18 +603,14 @@ public:
 
     static QWidget *createPanelWidget(QWidget *widget, const QString &displayName, const QString &icon)
     {
-        auto panel = new PropertiesPanel;
         auto w = new QWidget();
         auto l = new QVBoxLayout(w);
         l->addWidget(widget);
         l->addSpacerItem(new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding));
         l->setContentsMargins(QMargins());
-        panel->setWidget(w);
-        panel->setIcon(QIcon(icon));
-        panel->setDisplayName(displayName);
 
         auto result = new PanelsWidget;
-        result->addPropertiesPanel(panel);
+        result->addPropertiesPanel(displayName, QIcon(icon), w);
         return result;
     }
 
@@ -707,7 +701,7 @@ TargetGroupItem::TargetGroupItem(const QString &displayName, Project *project)
     QObject::connect(project, &Project::removedTarget,
             d, &TargetGroupItemPrivate::handleTargetRemoved);
     QObject::connect(project, &Project::activeTargetChanged,
-            d, &TargetGroupItemPrivate::handleTargetChanged);
+            d, &TargetGroupItemPrivate::handleTargetChanged, Qt::QueuedConnection);
 }
 
 TargetGroupItem::~TargetGroupItem()
@@ -715,28 +709,23 @@ TargetGroupItem::~TargetGroupItem()
     delete d;
 }
 
-TargetGroupItemPrivate::TargetGroupItemPrivate(TargetGroupItem *q,
-                                                               Project *project)
+TargetGroupItemPrivate::TargetGroupItemPrivate(TargetGroupItem *q, Project *project)
     : q(q), m_project(project)
 {
-    m_importer = project->createProjectImporter();
-
-    if (m_importer) {
-        auto importAction = new QAction(tr("Import existing build..."), 0);
-        QObject::connect(importAction, &QAction::triggered, [this] {
-            QString dir = m_project->projectDirectory().toString();
-            QString toImport = QFileDialog::getExistingDirectory(ICore::mainWindow(), tr("Import directory"), dir);
-            importTarget(FileName::fromString(toImport));
-        });
-    }
-
     // force a signal since the index has changed
     connect(KitManager::instance(), &KitManager::kitAdded,
             this, &TargetGroupItemPrivate::handleAddedKit);
     connect(KitManager::instance(), &KitManager::kitRemoved,
             this, &TargetGroupItemPrivate::handleRemovedKit);
+    connect(KitManager::instance(), &KitManager::kitUpdated,
+            this, &TargetGroupItemPrivate::handleUpdatedKit);
 
     rebuildContents();
+}
+
+TargetGroupItemPrivate::~TargetGroupItemPrivate()
+{
+    disconnect();
 }
 
 QVariant TargetGroupItem::data(int column, int role) const
@@ -764,7 +753,7 @@ QVariant TargetGroupItem::data(int column, int role) const
 bool TargetGroupItem::setData(int column, const QVariant &data, int role)
 {
     Q_UNUSED(data)
-    if (role == ItemActivatedFromBelowRole) {
+    if (role == ItemActivatedFromBelowRole || role == ItemUpdatedFromBelowRole) {
         // Bubble up to trigger setting the active project.
         parent()->setData(column, QVariant::fromValue(static_cast<TreeItem *>(this)), role);
         return true;
@@ -775,7 +764,7 @@ bool TargetGroupItem::setData(int column, const QVariant &data, int role)
 
 Qt::ItemFlags TargetGroupItem::flags(int) const
 {
-    return Qt::ItemIsEnabled;
+    return Qt::NoItemFlags;
 }
 
 TargetItem *TargetGroupItem::currentTargetItem() const
@@ -798,15 +787,22 @@ void TargetGroupItemPrivate::handleRemovedKit(Kit *kit)
     rebuildContents();
 }
 
+void TargetGroupItemPrivate::handleUpdatedKit(Kit *kit)
+{
+    Q_UNUSED(kit);
+    rebuildContents();
+}
+
 void TargetGroupItemPrivate::handleAddedKit(Kit *kit)
 {
-    q->appendChild(new TargetItem(m_project, kit->id()));
+    if (m_project->supportsKit(kit))
+        q->appendChild(new TargetItem(m_project, kit->id()));
 }
 
 void TargetItem::updateSubItems()
 {
     if (children().isEmpty() && isEnabled())
-        m_currentChild = 1; // We will add children below. Use 'Run' item by default.
+        m_currentChild = DefaultPage; // We will add children below.
     removeChildren();
     if (isEnabled()) {
         appendChild(new BuildOrRunItem(m_project, m_kitId, BuildOrRunItem::BuildPage));
@@ -818,8 +814,14 @@ void TargetGroupItemPrivate::rebuildContents()
 {
     q->removeChildren();
 
-    foreach (Kit *kit, KitManager::sortKits(KitManager::kits()))
+    KitMatcher matcher([this](const Kit *kit) { return m_project->supportsKit(const_cast<Kit *>(kit)); });
+    const QList<Kit *> kits = KitManager::sortKits(KitManager::matchingKits(matcher));
+    for (Kit *kit : kits)
         q->appendChild(new TargetItem(m_project, kit->id()));
+
+    if (q->parent())
+        q->parent()->setData(0, QVariant::fromValue(static_cast<TreeItem *>(q)),
+                             ItemUpdatedFromBelowRole);
 }
 
 void TargetGroupItemPrivate::handleTargetAdded(Target *target)

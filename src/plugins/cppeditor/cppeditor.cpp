@@ -44,6 +44,7 @@
 #include <coreplugin/actionmanager/actionmanager.h>
 #include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/editormanager/documentmodel.h>
+#include <coreplugin/infobar.h>
 
 #include <cpptools/cppchecksymbols.h>
 #include <cpptools/cppcodeformatter.h>
@@ -55,6 +56,7 @@
 #include <cpptools/cpptoolsconstants.h>
 #include <cpptools/cpptoolsplugin.h>
 #include <cpptools/cpptoolsreuse.h>
+#include <cpptools/cpptoolssettings.h>
 #include <cpptools/cppworkingcopy.h>
 #include <cpptools/symbolfinder.h>
 #include <cpptools/refactoringengineinterface.h>
@@ -77,6 +79,7 @@
 #include <cplusplus/FastPreprocessor.h>
 #include <cplusplus/MatchingText.h>
 #include <utils/qtcassert.h>
+#include <utils/utilsicons.h>
 
 #include <QApplication>
 #include <QAction>
@@ -126,9 +129,13 @@ public:
     QSharedPointer<FunctionDeclDefLink> m_declDefLink;
 
     QScopedPointer<FollowSymbolUnderCursor> m_followSymbolUnderCursor;
-    QToolButton *m_preprocessorButton;
+
+    QToolButton *m_preprocessorButton = nullptr;
+    QAction *m_headerErrorsIndicatorAction = nullptr;
 
     CppSelectionChanger m_cppSelectionChanger;
+
+    CppEditorWidget::HeaderErrorDiagnosticWidgetCreator m_headerErrorDiagnosticWidgetCreator;
 };
 
 CppEditorWidgetPrivate::CppEditorWidgetPrivate(CppEditorWidget *q)
@@ -139,7 +146,6 @@ CppEditorWidgetPrivate::CppEditorWidgetPrivate(CppEditorWidget *q)
     , m_useSelectionsUpdater(q)
     , m_declDefLinkFinder(new FunctionDeclDefLinkFinder(q))
     , m_followSymbolUnderCursor(new FollowSymbolUnderCursor(q))
-    , m_preprocessorButton(0)
     , m_cppSelectionChanger()
 {
 }
@@ -225,6 +231,19 @@ void CppEditorWidget::finalizeInitialization()
     updatePreprocessorButtonTooltip();
     connect(d->m_preprocessorButton, &QAbstractButton::clicked, this, &CppEditorWidget::showPreProcessorWidget);
     insertExtraToolBarWidget(TextEditorWidget::Left, d->m_preprocessorButton);
+
+    auto *headerErrorsIndicatorButton = new QToolButton(this);
+    headerErrorsIndicatorButton->setToolTip(tr("Show First Error in Included Files"));
+    headerErrorsIndicatorButton->setIcon(Utils::Icons::WARNING_TOOLBAR.pixmap());
+    connect(headerErrorsIndicatorButton, &QAbstractButton::clicked, []() {
+        CppToolsSettings::instance()->setShowHeaderErrorInfoBar(true);
+    });
+    d->m_headerErrorsIndicatorAction = insertExtraToolBarWidget(TextEditorWidget::Left,
+                                                                headerErrorsIndicatorButton);
+    d->m_headerErrorsIndicatorAction->setVisible(false);
+    connect(CppToolsSettings::instance(), &CppToolsSettings::showHeaderErrorInfoBarChanged,
+            this, &CppEditorWidget::updateHeaderErrorWidgets);
+
     insertExtraToolBarWidget(TextEditorWidget::Left, d->m_cppEditorOutline->widget());
 }
 
@@ -239,6 +258,10 @@ void CppEditorWidget::finalizeInitializationAfterDuplication(TextEditorWidget *o
     d->m_cppEditorOutline->update();
     const Id selectionKind = CodeWarningsSelection;
     setExtraSelections(selectionKind, cppEditorWidget->extraSelections(selectionKind));
+
+    d->m_headerErrorDiagnosticWidgetCreator
+            = cppEditorWidget->d->m_headerErrorDiagnosticWidgetCreator;
+    updateHeaderErrorWidgets();
 }
 
 CppEditorWidget::~CppEditorWidget()
@@ -287,6 +310,7 @@ void CppEditorWidget::onCppDocumentUpdated()
 
 void CppEditorWidget::onCodeWarningsUpdated(unsigned revision,
                                             const QList<QTextEdit::ExtraSelection> selections,
+                                            const HeaderErrorDiagnosticWidgetCreator &creator,
                                             const TextEditor::RefactorMarkers &refactorMarkers)
 {
     if (revision != documentRevision())
@@ -294,6 +318,9 @@ void CppEditorWidget::onCodeWarningsUpdated(unsigned revision,
 
     setExtraSelections(TextEditorWidget::CodeWarningsSelection, selections);
     setRefactorMarkers(refactorMarkersWithoutClangMarkers() + refactorMarkers);
+
+    d->m_headerErrorDiagnosticWidgetCreator = creator;
+    updateHeaderErrorWidgets();
 }
 
 void CppEditorWidget::onIfdefedOutBlocksUpdated(unsigned revision,
@@ -302,6 +329,25 @@ void CppEditorWidget::onIfdefedOutBlocksUpdated(unsigned revision,
     if (revision != documentRevision())
         return;
     setIfdefedOutBlocks(ifdefedOutBlocks);
+}
+
+void CppEditorWidget::updateHeaderErrorWidgets()
+{
+    const Id id(Constants::ERRORS_IN_HEADER_FILES);
+    InfoBar *infoBar = textDocument()->infoBar();
+
+    infoBar->removeInfo(id);
+
+    if (d->m_headerErrorDiagnosticWidgetCreator) {
+        if (CppToolsSettings::instance()->showHeaderErrorInfoBar()) {
+            addHeaderErrorInfoBarEntry();
+            d->m_headerErrorsIndicatorAction->setVisible(false);
+        } else {
+            d->m_headerErrorsIndicatorAction->setVisible(true);
+        }
+    } else {
+        d->m_headerErrorsIndicatorAction->setVisible(false);
+    }
 }
 
 void CppEditorWidget::findUsages()
@@ -399,6 +445,22 @@ void CppEditorWidget::renameSymbolUnderCursorBuiltin()
         renameUsages(); // Rename non-local symbol or macro
 }
 
+void CppEditorWidget::addHeaderErrorInfoBarEntry() const
+{
+    InfoBarEntry info(Constants::ERRORS_IN_HEADER_FILES,
+                      tr("<b>Warning</b>: The code model could not parse an included file, "
+                         "which might lead to slow or incorrect code completion and "
+                         "highlighting, for example."));
+    info.setDetailsWidgetCreator(d->m_headerErrorDiagnosticWidgetCreator);
+    info.setShowDefaultCancelButton(false);
+    info.setCustomButtonInfo("Minimize", [](){
+         CppToolsSettings::instance()->setShowHeaderErrorInfoBar(false);
+    });
+
+    InfoBar *infoBar = textDocument()->infoBar();
+    infoBar->addInfo(info);
+}
+
 namespace {
 
 QList<ProjectPart::Ptr> fetchProjectParts(CppTools::CppModelManager *modelManager,
@@ -459,7 +521,7 @@ sourceLocationsToExtraSelections(const std::vector<SourceLocationContainer> &sou
     const auto textCharFormat = occurrencesTextCharFormat();
 
     QList<QTextEdit::ExtraSelection> selections;
-    selections.reserve(sourceLocations.size());
+    selections.reserve(int(sourceLocations.size()));
 
     auto sourceLocationToExtraSelection = [&] (const SourceLocationContainer &sourceLocation) {
         QTextEdit::ExtraSelection selection;

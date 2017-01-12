@@ -56,18 +56,12 @@ RefactoringCompilerOptionsBuilder::RefactoringCompilerOptionsBuilder(CppTools::P
 
 bool RefactoringCompilerOptionsBuilder::excludeHeaderPath(const QString &path) const
 {
-    if (path.contains(QLatin1String("lib/gcc/i686-apple-darwin")))
-        return true;
+    if (m_projectPart.toolchainType == ProjectExplorer::Constants::CLANG_TOOLCHAIN_TYPEID) {
+        if (path.contains(QLatin1String("lib/gcc/i686-apple-darwin")))
+            return true;
+    }
 
-    // We already provide a custom clang include path matching the used libclang version,
-    // so better ignore the clang include paths from the system as this might lead to an
-    // unfavorable order with regard to include_next.
-    static QRegularExpression clangIncludeDir(
-                QLatin1String("\\A.*/lib/clang/\\d+\\.\\d+(\\.\\d+)?/include\\z"));
-    if (clangIncludeDir.match(path).hasMatch())
-        return true;
-
-    return false;
+    return CompilerOptionsBuilder::excludeHeaderPath(path);
 }
 
 void RefactoringCompilerOptionsBuilder::addPredefinedMacrosAndHeaderPathsOptions()
@@ -123,24 +117,29 @@ void RefactoringCompilerOptionsBuilder::addExtraOptions()
 }
 
 Utils::SmallStringVector RefactoringCompilerOptionsBuilder::build(CppTools::ProjectPart *projectPart,
-                                                                  CppTools::ProjectFile::Kind fileKind)
+                                                                  CppTools::ProjectFile::Kind fileKind,
+                                                                  PchUsage pchUsage)
 {
     if (projectPart == nullptr)
         return Utils::SmallStringVector();
 
     RefactoringCompilerOptionsBuilder optionsBuilder(projectPart);
 
+    optionsBuilder.addWordWidth();
     optionsBuilder.addTargetTriple();
     optionsBuilder.addLanguageOption(fileKind);
     optionsBuilder.addOptionsForLanguage(/*checkForBorlandExtensions*/ true);
     optionsBuilder.enableExceptions();
 
+    optionsBuilder.addDefineFloat128ForMingw();
+    optionsBuilder.addDefineToAvoidIncludingGccOrMinGwIntrinsics();
     optionsBuilder.addToolchainAndProjectDefines();
     optionsBuilder.undefineCppLanguageFeatureMacrosForMsvc2015();
 
     optionsBuilder.addPredefinedMacrosAndHeaderPathsOptions();
     optionsBuilder.addWrappedQtHeadersIncludePath();
     optionsBuilder.addHeaderPathOptions();
+    optionsBuilder.addPrecompiledHeaderOptions(pchUsage);
     optionsBuilder.addProjectConfigFileInclude();
 
     optionsBuilder.addMsvcCompatibilityVersion();

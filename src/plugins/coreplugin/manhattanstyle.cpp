@@ -340,9 +340,8 @@ QIcon ManhattanStyle::standardIcon(StandardPixmap standardIcon, const QStyleOpti
     if (standardIcon == QStyle::SP_ComputerIcon) {
         // Ubuntu has in some versions a 16x16 icon, see QTCREATORBUG-12832
         const QList<QSize> &sizes = icon.availableSizes();
-        if (Utils::allOf(sizes, [](const QSize &size) { return size.width() < 32;})) {
-            icon = QIcon(QLatin1String(":/core/images/Desktop.png"));
-        }
+        if (Utils::allOf(sizes, [](const QSize &size) { return size.width() < 32;}))
+            icon = QIcon(":/utils/images/Desktop.png");
     }
     return icon;
 }
@@ -466,9 +465,9 @@ void ManhattanStyle::drawPrimitive(PrimitiveElement element, const QStyleOption 
                 painter->fillRect(backgroundRect, option->palette.base());
 
                 static const QImage bg(StyleHelper::dpiSpecificImageFile(
-                                           QLatin1String(":/core/images/inputfield.png")));
+                                           QLatin1String(":/utils/images/inputfield.png")));
                 static const QImage bg_disabled(StyleHelper::dpiSpecificImageFile(
-                                                    QLatin1String(":/core/images/inputfield_disabled.png")));
+                                                    QLatin1String(":/utils/images/inputfield_disabled.png")));
 
                 StyleHelper::drawCornerImage(enabled ? bg : bg_disabled,
                                              painter, option->rect, 5, 5, 5, 5);

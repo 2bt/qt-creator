@@ -134,7 +134,7 @@ static ComponentTextModifier *createComponentTextModifier(TextModifier *original
         componentEndOffset = componentStartOffset + rewriterView->nodeLength(componentNode);
     }
 
-    return new ComponentTextModifier (originalModifier, componentStartOffset, componentEndOffset, rootStartOffset);
+    return new ComponentTextModifier(originalModifier, componentStartOffset, componentEndOffset, rootStartOffset);
 }
 
 bool DesignDocument::loadInFileComponent(const ModelNode &componentNode)
@@ -321,7 +321,7 @@ void DesignDocument::changeToMaster()
     if (m_inFileComponentModel)
         changeToDocumentModel();
 
-    QmlDesignerPlugin::instance()->viewManager().pushFileOnCrumbleBar(fileName().toString());
+    QmlDesignerPlugin::instance()->viewManager().pushFileOnCrumbleBar(fileName());
     QmlDesignerPlugin::instance()->viewManager().setComponentNode(rootModelNode());
 }
 

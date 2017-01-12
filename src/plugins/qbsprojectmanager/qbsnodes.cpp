@@ -527,7 +527,7 @@ void QbsGroupNode::setupFolder(ProjectExplorer::FolderNode *root,
             using ResourceEditor::ResourceTopLevelNode;
             if (!fn) {
                 if (isQrcFile) {
-                    fn = new ResourceTopLevelNode(Utils::FileName::fromString(c->path()), root);
+                    fn = new ResourceTopLevelNode(Utils::FileName::fromString(c->path()), QString(), root);
                 } else {
                     fn = new QbsFolderNode(Utils::FileName::fromString(c->path()),
                                            ProjectExplorer::FolderNodeType,
@@ -710,10 +710,12 @@ void QbsProductNode::setQbsProductData(const qbs::Project &project, const qbs::P
         }
     }
 
-    const QStringList generatedFiles
-            = Utils::transform(prd.generatedArtifacts(), &qbs::ArtifactData::filePath);
-    QbsGroupNode::setupFiles(m_generatedFilesNode, qbs::GroupData(), generatedFiles,
-                             prd.buildDirectory(), true, true);
+    if (prd.isEnabled()) {
+        const QStringList generatedFiles
+                = Utils::transform(prd.generatedArtifacts(), &qbs::ArtifactData::filePath);
+        QbsGroupNode::setupFiles(m_generatedFilesNode, qbs::GroupData(), generatedFiles,
+                                 prd.buildDirectory(), true, true);
+    }
 
     addProjectNodes(toAdd);
     removeProjectNodes(toRemove);

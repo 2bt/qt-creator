@@ -74,9 +74,10 @@ TestRunner::TestRunner(QObject *parent) :
     connect(this, &TestRunner::requestStopTestRun,
             &m_futureWatcher, &QFutureWatcher<TestResultPtr>::cancel);
     connect(&m_futureWatcher, &QFutureWatcher<TestResultPtr>::canceled,
-            this, [this]() { emit testResultReady(TestResultPtr(new FaultyTestResult(
-                                                      Result::MessageFatal,
-                                                      tr("Test run canceled by user."))));
+            this, [this]() {
+        emit testResultReady(TestResultPtr(new FaultyTestResult(
+                Result::MessageFatal, tr("Test run canceled by user."))));
+        m_executingTests = false; // avoid being stuck if finished() signal won't get emitted
     });
 }
 
@@ -138,7 +139,7 @@ static void performTestRun(QFutureInterface<TestResultPtr> &futureInterface,
             continue;
         }
 
-        testProcess.setArguments(testConfiguration->argumentsForTestRunner(settings));
+        testProcess.setArguments(testConfiguration->argumentsForTestRunner());
         testProcess.setWorkingDirectory(testConfiguration->workingDirectory());
         if (Utils::HostOsInfo::isWindowsHost())
             environment.insert("QT_LOGGING_TO_CONSOLE", "1");
@@ -231,15 +232,12 @@ void TestRunner::prepareToRunTests(Mode mode)
     if (!projectExplorerSettings.buildBeforeDeploy || mode == TestRunner::DebugWithoutDeploy
             || mode == TestRunner::RunWithoutDeploy) {
         runOrDebugTests();
+    } else  if (project->hasActiveBuildSettings()) {
+        buildProject(project);
     } else {
-        if (project->hasActiveBuildSettings()) {
-            buildProject(project);
-        } else {
-            emit testResultReady(TestResultPtr(new FaultyTestResult(Result::MessageFatal,
-                tr("Project is not configured. Canceling test run."))));
-            onFinished();
-            return;
-        }
+        emit testResultReady(TestResultPtr(new FaultyTestResult(Result::MessageFatal,
+                                           tr("Project is not configured. Canceling test run."))));
+        onFinished();
     }
 }
 
@@ -304,8 +302,7 @@ void TestRunner::debugTests()
 
     Debugger::DebuggerStartParameters sp;
     sp.inferior.executable = commandFilePath;
-    sp.inferior.commandLineArguments = config->argumentsForTestRunner(
-                *AutotestPlugin::instance()->settings()).join(' ');
+    sp.inferior.commandLineArguments = config->argumentsForTestRunner().join(' ');
     sp.inferior.environment = config->environment();
     sp.inferior.workingDirectory = config->workingDirectory();
     sp.displayName = config->displayName();
@@ -369,6 +366,7 @@ void TestRunner::runOrDebugTests()
         debugTests();
         break;
     default:
+        onFinished();
         QTC_ASSERT(false, return);  // unexpected run mode
     }
 }
@@ -381,6 +379,8 @@ void TestRunner::buildProject(ProjectExplorer::Project *project)
     connect(buildManager, &ProjectExplorer::BuildManager::buildQueueFinished,
             this, &TestRunner::buildFinished);
     ProjectExplorer::ProjectExplorerPlugin::buildProject(project);
+    if (!buildManager->isBuilding())
+        buildFinished(false);
 }
 
 void TestRunner::buildFinished(bool success)

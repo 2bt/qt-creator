@@ -61,16 +61,12 @@ FORMS += \
     $$PWD/colorsettings.ui \
     $$PWD/colorthemedialog.ui \
     $$PWD/magnifier.ui \
-    $$PWD/navigator.ui \
     $$PWD/navigatorslider.ui \
     $$PWD/search.ui \
-    $$PWD/shapegroupwidget.ui \
     $$PWD/shapestoolbox.ui \
-    $$PWD/stateproperties.ui \
     $$PWD/stateview.ui \
     $$PWD/statistics.ui \
-    $$PWD/statisticsdialog.ui \
-    $$PWD/structure.ui
+    $$PWD/statisticsdialog.ui
 
 RESOURCES += \
     $$PWD/common.qrc

@@ -311,6 +311,7 @@ int main(int argc, char **argv)
     setrlimit(RLIMIT_NOFILE, &rl);
 #endif
 
+    SharedTools::QtSingleApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
     SharedTools::QtSingleApplication app((QLatin1String(appNameC)), argc, argv);
 
     loadFonts();
@@ -327,7 +328,9 @@ int main(int argc, char **argv)
     const int threadCount = QThreadPool::globalInstance()->maxThreadCount();
     QThreadPool::globalInstance()->setMaxThreadCount(qMax(4, 2 * threadCount));
 
-    CrashHandlerSetup setupCrashHandler; // Display a backtrace once a serious signal is delivered.
+    // Display a backtrace once a serious signal is delivered (Linux only).
+    const QString libexecPath = QCoreApplication::applicationDirPath() + "/../libexec/qtcreator";
+    CrashHandlerSetup setupCrashHandler(appNameC, CrashHandlerSetup::EnableRestart, libexecPath);
 
 #ifdef ENABLE_QT_BREAKPAD
     QtSystemExceptionHandler systemExceptionHandler;

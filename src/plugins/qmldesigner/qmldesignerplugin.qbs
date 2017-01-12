@@ -171,6 +171,8 @@ Project {
                 "container/informationcontainer.h",
                 "container/instancecontainer.cpp",
                 "container/instancecontainer.h",
+                "container/mockuptypecontainer.cpp",
+                "container/mockuptypecontainer.h",
                 "container/propertyabstractcontainer.cpp",
                 "container/propertyabstractcontainer.h",
                 "container/propertybindingcontainer.cpp",
@@ -255,6 +257,7 @@ Project {
                 "include/nodeinstanceview.h",
                 "include/nodelistproperty.h",
                 "include/nodemetainfo.h",
+                "include/nodehints.h",
                 "include/nodeproperty.h",
                 "include/notimplementedexception.h",
                 "include/plaintexteditmodifier.h",
@@ -292,6 +295,7 @@ Project {
                 "metainfo/metainfo.cpp",
                 "metainfo/metainforeader.cpp",
                 "metainfo/nodemetainfo.cpp",
+                "metainfo/nodehints.cpp",
                 "metainfo/subcomponentmanager.cpp",
                 "model/abstractproperty.cpp",
                 "model/abstractview.cpp",
@@ -642,8 +646,6 @@ Project {
             "settingspage.ui",
             "shortcutmanager.cpp",
             "shortcutmanager.h",
-            "styledoutputpaneplaceholder.cpp",
-            "styledoutputpaneplaceholder.h",
         ]
     }
 }

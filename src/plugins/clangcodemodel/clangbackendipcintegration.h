@@ -85,6 +85,7 @@ private:
 private:
     AliveHandler m_aliveHandler;
     QHash<quint64, ClangCompletionAssistProcessor *> m_assistProcessorsTable;
+    const bool m_printAliveMessage = false;
 };
 
 class IpcSenderInterface
@@ -116,6 +117,7 @@ public:
 
 public:
     IpcCommunicator();
+    ~IpcCommunicator();
 
     void registerTranslationUnitsForEditor(const FileContainers &fileContainers);
     void updateTranslationUnitsForEditor(const FileContainers &fileContainers);
@@ -164,9 +166,16 @@ private:
     void registerVisibleCppEditorDocumentAndMarkInvisibleDirty();
     void registerCurrentCodeModelUiHeaders();
 
+    void setupDummySender();
+
     void onConnectedToBackend();
+    void onDisconnectedFromBackend();
     void onEditorAboutToClose(Core::IEditor *editor);
-    void onCoreAboutToClose();
+
+    void logExecutableDoesNotExist();
+    void logRestartedDueToUnexpectedFinish();
+    void logStartTimeOut();
+    void logError(const QString &text);
 
     void updateTranslationUnitVisiblity(const Utf8String &currentEditorFilePath,
                                         const Utf8StringVector &visibleEditorsFilePaths);
@@ -174,6 +183,7 @@ private:
 private:
     IpcReceiver m_ipcReceiver;
     ClangBackEnd::ClangCodeModelConnectionClient m_connection;
+    QTimer m_backendStartTimeOut;
     QScopedPointer<IpcSenderInterface> m_ipcSender;
     int m_connectedCount = 0;
 };

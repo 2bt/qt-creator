@@ -84,7 +84,7 @@ def prepareTestExamples():
 def switchSession(toSession):
     test.log("Switching to session '%s'" % toSession)
     invokeMenuItem("File", "Session Manager...")
-    clickItem(waitForObject("{name='sessionList' type='QListWidget' visible='1' "
+    clickItem(waitForObject("{name='sessionView' type='ProjectExplorer::Internal::SessionView' visible='1' "
                             "window=':Session Manager_ProjectExplorer::Internal::SessionDialog'}"),
                             toSession, 5, 5, 0, Qt.LeftButton)
     clickButton(waitForObject("{name='btSwitch' text='Switch to' type='QPushButton' visible='1' "

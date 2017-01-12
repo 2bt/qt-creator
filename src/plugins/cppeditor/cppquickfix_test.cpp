@@ -301,7 +301,7 @@ public:
 
     void match(const CppQuickFixInterface &cppQuickFixInterface, QuickFixOperations &result)
     {
-        result.append(new AddIncludeForUndefinedIdentifierOp(cppQuickFixInterface, 0, m_include));
+        result << new AddIncludeForUndefinedIdentifierOp(cppQuickFixInterface, 0, m_include);
     }
 
 private:
@@ -766,6 +766,66 @@ void CppEditorPlugin::test_quickfix_data()
         "}\n"
         "\n"
         "void Something::setIt(const int *value)\n"
+        "{\n"
+        "    it = value;\n"
+        "}\n"
+    );
+
+    // Checks: No special treatment for reference to non const.
+    QTest::newRow("GenerateGetterSetter_referenceToNonConst")
+        << CppQuickFixFactoryPtr(new GenerateGetterSetter) << _(
+        "\n"
+        "class Something\n"
+        "{\n"
+        "    int &it@;\n"
+        "};\n"
+        ) << _(
+        "\n"
+        "class Something\n"
+        "{\n"
+        "    int &it;\n"
+        "\n"
+        "public:\n"
+        "    int &getIt() const;\n"
+        "    void setIt(const int &value);\n"
+        "};\n"
+        "\n"
+        "int &Something::getIt() const\n"
+        "{\n"
+        "    return it;\n"
+        "}\n"
+        "\n"
+        "void Something::setIt(const int &value)\n"
+        "{\n"
+        "    it = value;\n"
+        "}\n"
+    );
+
+    // Checks: No special treatment for reference to const.
+    QTest::newRow("GenerateGetterSetter_referenceToConst")
+        << CppQuickFixFactoryPtr(new GenerateGetterSetter) << _(
+        "\n"
+        "class Something\n"
+        "{\n"
+        "    const int &it@;\n"
+        "};\n"
+        ) << _(
+        "\n"
+        "class Something\n"
+        "{\n"
+        "    const int &it;\n"
+        "\n"
+        "public:\n"
+        "    const int &getIt() const;\n"
+        "    void setIt(const int &value);\n"
+        "};\n"
+        "\n"
+        "const int &Something::getIt() const\n"
+        "{\n"
+        "    return it;\n"
+        "}\n"
+        "\n"
+        "void Something::setIt(const int &value)\n"
         "{\n"
         "    it = value;\n"
         "}\n"

@@ -48,6 +48,14 @@ const Icon ZOOM({
         {QLatin1String(":/utils/images/zoom.png"), Theme::PanelTextColorMid}}, Icon::Tint);
 const Icon ZOOM_TOOLBAR({
         {QLatin1String(":/utils/images/zoom.png"), Theme::IconsBaseColor}});
+const Icon ZOOMIN_TOOLBAR({
+        {QLatin1String(":/utils/images/zoom.png"), Theme::IconsBaseColor},
+        {QLatin1String(":/utils/images/zoomin_overlay.png"), Theme::IconsBaseColor}});
+const Icon ZOOMOUT_TOOLBAR({
+        {QLatin1String(":/utils/images/zoom.png"), Theme::IconsBaseColor},
+        {QLatin1String(":/utils/images/zoomout_overlay.png"), Theme::IconsBaseColor}});
+const Icon FITTOVIEW_TOOLBAR({
+        {QLatin1String(":/utils/images/fittoview.png"), Theme::IconsBaseColor}});
 const Icon OK({
         {QLatin1String(":/utils/images/ok.png"), Theme::IconsRunToolBarColor}}, Icon::Tint);
 const Icon NOTLOADED({
@@ -57,25 +65,33 @@ const Icon BROKEN({
 const Icon ERROR({
         {QLatin1String(":/utils/images/warningfill.png"), Theme::BackgroundColorNormal},
         {QLatin1String(":/utils/images/error.png"), Theme::IconsErrorColor}}, Icon::Tint);
+const Icon BOOKMARK({
+        {QLatin1String(":/utils/images/bookmark.png"), Theme::PanelTextColorMid}}, Icon::Tint);
+const Icon BOOKMARK_TOOLBAR({
+        {QLatin1String(":/utils/images/bookmark.png"), Theme::IconsBaseColor}});
+const Icon BOOKMARK_TEXTEDITOR({
+        {QLatin1String(":/utils/images/bookmark.png"), Theme::Bookmarks_TextMarkColor}}, Icon::Tint);
+const Icon SNAPSHOT_TOOLBAR({
+        {QLatin1String(":/utils/images/snapshot.png"), Theme::IconsBaseColor}});
 
-const Icon NEWFILE(
-        QLatin1String(":/utils/images/filenew.png"));
-const Icon OPENFILE(
-        QLatin1String(":/utils/images/fileopen.png"));
+const Icon NEWFILE({
+        {QLatin1String(":/utils/images/filenew.png"), Theme::PanelTextColorMid}}, Icon::Tint);
+const Icon OPENFILE({
+        {QLatin1String(":/utils/images/fileopen.png"), Theme::PanelTextColorMid}}, Icon::Tint);
 const Icon SAVEFILE({
         {QLatin1String(":/utils/images/filesave.png"), Theme::PanelTextColorMid}}, Icon::Tint);
 const Icon SAVEFILE_TOOLBAR({
         {QLatin1String(":/utils/images/filesave.png"), Theme::IconsBaseColor}});
-const Icon UNDO(
-        QLatin1String(":/utils/images/undo.png"));
-const Icon REDO(
-        QLatin1String(":/utils/images/redo.png"));
-const Icon COPY(
-        QLatin1String(":/utils/images/editcopy.png"));
-const Icon PASTE(
-        QLatin1String(":/utils/images/editpaste.png"));
-const Icon CUT(
-        QLatin1String(":/utils/images/editcut.png"));
+const Icon UNDO({
+        {QLatin1String(":/utils/images/undo.png"), Theme::PanelTextColorMid}}, Icon::Tint);
+const Icon REDO({
+        {QLatin1String(":/utils/images/redo.png"), Theme::PanelTextColorMid}}, Icon::Tint);
+const Icon COPY({
+        {QLatin1String(":/utils/images/editcopy.png"), Theme::PanelTextColorMid}}, Icon::Tint);
+const Icon PASTE({
+        {QLatin1String(":/utils/images/editpaste.png"), Theme::PanelTextColorMid}}, Icon::Tint);
+const Icon CUT({
+        {QLatin1String(":/utils/images/editcut.png"), Theme::PanelTextColorMid}}, Icon::Tint);
 const Icon DIR(
         QLatin1String(":/utils/images/dir.png"));
 const Icon RESET({
@@ -181,9 +197,15 @@ const Icon COLLAPSE({
 const Icon COLLAPSE_TOOLBAR({
         {QLatin1String(":/utils/images/collapse.png"), Theme::IconsBaseColor}});
 const Icon EMPTY14(":/utils/images/empty14.png");
-const Icon ENABLE_KIT_OVERLAY({
-        {":/projectexplorer/images/enablekitbackground.png", Theme::IconsRunColor},
-        {":/projectexplorer/images/enablekitforeground.png", Theme::BackgroundColorNormal}}, Icon::Tint);
+const Icon OVERLAY_ADD({
+        {":/utils/images/iconoverlay_add_background.png", Theme::BackgroundColorNormal},
+        {":/utils/images/iconoverlay_add.png", Theme::IconsRunColor}}, Icon::Tint);
+const Icon OVERLAY_WARNING({
+        {":/utils/images/iconoverlay_warning_background.png", Theme::BackgroundColorNormal},
+        {":/utils/images/iconoverlay_warning.png", Theme::IconsWarningColor}}, Icon::Tint);
+const Icon OVERLAY_ERROR({
+        {":/utils/images/iconoverlay_error_background.png", Theme::BackgroundColorNormal},
+        {":/utils/images/iconoverlay_error.png", Theme::IconsErrorColor}}, Icon::Tint);
 
 } // namespace Icons
 } // namespace Utils

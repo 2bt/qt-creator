@@ -90,7 +90,7 @@ static inline QStringList globalQtEnums()
 static inline QStringList knownEnumScopes()
 {
     static const QStringList list = {
-        "TextInput", "TextEdit", "Material", "Universal"
+        "TextInput", "TextEdit", "Material", "Universal", "Font"
     };
     return list;
 }
@@ -819,7 +819,23 @@ static void removeUsedImports(QHash<QString, ImportKey> &filteredPossibleImportK
         filteredPossibleImportKeys.remove(import.info.path());
 }
 
-static QList<QmlDesigner::Import> generatePossibleImports(const QHash<QString, ImportKey> &filteredPossibleImportKeys)
+static QList<QmlDesigner::Import> generatePossibleFileImports(const QString &path)
+{
+    QList<QmlDesigner::Import> possibleImports;
+
+    foreach (const QString &subDir, QDir(path).entryList(QDir::Dirs | QDir::NoDot | QDir::NoDotDot)) {
+        QDir dir(path + "/" + subDir);
+        if (!dir.entryInfoList(QStringList("*.qml"), QDir::Files).isEmpty()
+                && dir.entryInfoList(QStringList("qmldir"), QDir::Files).isEmpty()) {
+            QmlDesigner::Import import = QmlDesigner::Import::createFileImport(subDir);
+            possibleImports.append(import);
+        }
+    }
+
+    return possibleImports;
+}
+
+static QList<QmlDesigner::Import> generatePossibleLibraryImports(const QHash<QString, ImportKey> &filteredPossibleImportKeys)
 {
     QList<QmlDesigner::Import> possibleImports;
 
@@ -842,9 +858,11 @@ void TextToModelMerger::setupPossibleImports(const QmlJS::Snapshot &snapshot, co
 
     removeUsedImports(filteredPossibleImportKeys, m_scopeChain->context()->imports(m_document.data())->all());
 
-    QList<QmlDesigner::Import> possibleImports = generatePossibleImports(filteredPossibleImportKeys);
+    QList<QmlDesigner::Import> possibleImports = generatePossibleLibraryImports(filteredPossibleImportKeys);
 
-    if ( m_rewriterView->isAttached())
+    possibleImports.append(generatePossibleFileImports(document()->path()));
+
+    if (m_rewriterView->isAttached())
         m_rewriterView->model()->setPossibleImports(possibleImports);
 }
 
@@ -1593,7 +1611,9 @@ void ModelValidator::variantValuesDiffer(VariantProperty &modelProperty, const Q
         QTC_ASSERT(modelProperty.dynamicTypeName() == dynamicTypeName, return);
     }
 
-    QTC_ASSERT(equals(modelProperty.value(), qmlVariantValue), return);
+
+
+    QTC_ASSERT(equals(modelProperty.value(), qmlVariantValue), qWarning() << modelProperty.value() << qmlVariantValue);
     QTC_ASSERT(0, return);
 }
 
@@ -1934,13 +1954,22 @@ void TextToModelMerger::collectImportErrors(QList<RewriterError> *errors)
         errors->append(RewriterError(diagnosticMessage, QUrl::fromLocalFile(m_document->fileName())));
     }
 
+    bool hasQtQuick = false;
     foreach (const QmlDesigner::Import &import, m_rewriterView->model()->imports()) {
-        if (import.isLibraryImport() && import.url() == QStringLiteral("QtQuick") && !supportedQtQuickVersion(import.version())) {
-            const QmlJS::DiagnosticMessage diagnosticMessage(QmlJS::Severity::Error, AST::SourceLocation(0, 0, 0, 0),
-                                                             QCoreApplication::translate("QmlDesigner::TextToModelMerger", "Unsupported QtQuick version"));
-            errors->append(RewriterError(diagnosticMessage, QUrl::fromLocalFile(m_document->fileName())));
+        if (import.isLibraryImport() && import.url() == QStringLiteral("QtQuick")) {
+
+            if (supportedQtQuickVersion(import.version())) {
+                hasQtQuick = true;
+            } else {
+                const QmlJS::DiagnosticMessage diagnosticMessage(QmlJS::Severity::Error, AST::SourceLocation(0, 0, 0, 0),
+                                                                 QCoreApplication::translate("QmlDesigner::TextToModelMerger", "Unsupported QtQuick version"));
+                errors->append(RewriterError(diagnosticMessage, QUrl::fromLocalFile(m_document->fileName())));
+            }
         }
     }
+
+    if (!hasQtQuick)
+        errors->append(RewriterError(QCoreApplication::translate("QmlDesigner::TextToModelMerger", "No import for Qt Quick found.")));
 }
 
 void TextToModelMerger::collectSemanticErrorsAndWarnings(QList<RewriterError> *errors, QList<RewriterError> *warnings)

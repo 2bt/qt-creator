@@ -35,6 +35,7 @@
 
 #include <QDir>
 #include <QTemporaryFile>
+#include <QTextCodec>
 
 enum { debug = 0 };
 
@@ -100,7 +101,8 @@ ToolChain::CompilerFlags AbstractMsvcToolChain::compilerFlags(const QStringList 
     case Abi::WindowsMsvc2012Flavor: flags |= StandardCxx11;
         break;
     case Abi::WindowsMsvc2013Flavor:
-    case Abi::WindowsMsvc2015Flavor: flags |= StandardCxx14;
+    case Abi::WindowsMsvc2015Flavor:
+    case Abi::WindowsMsvc2017Flavor: flags |= StandardCxx14;
         break;
     default:
         break;
@@ -208,7 +210,16 @@ Utils::FileName AbstractMsvcToolChain::compilerCommand() const
 {
     Utils::Environment env = Utils::Environment::systemEnvironment();
     addToEnvironment(env);
-    return env.searchInPath(QLatin1String("cl.exe"));
+
+    Utils::FileName clexe = env.searchInPath(QLatin1String("cl.exe"), QStringList(), [](const QString &name) {
+        QDir dir(QDir::cleanPath(QFileInfo(name).absolutePath() + QStringLiteral("/..")));
+        do {
+            if (QFile::exists(dir.absoluteFilePath(QStringLiteral("vcvarsall.bat"))))
+                return true;
+        } while (dir.cdUp() && !dir.isRoot());
+        return false;
+    });
+    return clexe;
 }
 
 IOutputParser *AbstractMsvcToolChain::outputParser() const
@@ -260,6 +271,7 @@ bool AbstractMsvcToolChain::generateEnvironmentSettings(Utils::Environment &env,
         call += ' ';
         call += batchArgs.toLocal8Bit();
     }
+    saver.write("chcp 65001\r\n");
     saver.write(call + "\r\n");
     saver.write("@echo " + marker.toLocal8Bit() + "\r\n");
     saver.write("set\r\n");
@@ -286,6 +298,7 @@ bool AbstractMsvcToolChain::generateEnvironmentSettings(Utils::Environment &env,
     if (debug)
         qDebug() << "readEnvironmentSetting: " << call << cmdPath << cmdArguments.join(' ')
                  << " Env: " << env.size();
+    run.setCodec(QTextCodec::codecForName("UTF-8"));
     Utils::SynchronousProcessResponse response = run.runBlocking(cmdPath.toString(), cmdArguments);
     if (response.result != Utils::SynchronousProcessResponse::Finished) {
         qWarning() << response.exitMessage(cmdPath.toString(), 10);

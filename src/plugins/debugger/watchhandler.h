@@ -26,6 +26,7 @@
 #pragma once
 
 #include "watchdata.h"
+#include "debuggerengine.h"
 
 #include <QVector>
 
@@ -81,7 +82,7 @@ public:
     QSet<QString> expandedINames() const;
 
     static QStringList watchedExpressions();
-    static QHash<QString, int> watcherNames();
+    static QMap<QString, int> watcherNames();
 
     void appendFormatRequests(DebuggerCommand *cmd);
     void appendWatchersAndTooltipRequests(DebuggerCommand *cmd);
@@ -111,7 +112,7 @@ public:
     void resetValueCache();
     void resetWatchers();
 
-    void notifyUpdateStarted(const QStringList &inames = {});
+    void notifyUpdateStarted(const UpdateParameters &updateParameters = UpdateParameters());
     void notifyUpdateFinished();
 
     void reexpandItems();

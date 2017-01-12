@@ -31,7 +31,10 @@
 #include <utils/qtcassert.h>
 
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSet>
 #include <QTextDocument>
 #include <QUuid>
@@ -44,6 +47,12 @@ const char CMAKE_INFORMATION_COMMAND[] = "Binary";
 const char CMAKE_INFORMATION_DISPLAYNAME[] = "DisplayName";
 const char CMAKE_INFORMATION_AUTORUN[] = "AutoRun";
 const char CMAKE_INFORMATION_AUTODETECTED[] = "AutoDetected";
+
+
+bool CMakeTool::Generator::matches(const QString &n, const QString &ex) const
+{
+    return n == name && (ex.isEmpty() || extraGenerators.contains(ex));
+}
 
 ///////////////////////////
 // CMakeTool
@@ -104,7 +113,7 @@ bool CMakeTool::isValid() const
     return m_didRun;
 }
 
-Utils::SynchronousProcessResponse CMakeTool::run(const QString &arg) const
+Utils::SynchronousProcessResponse CMakeTool::run(const QStringList &args, bool mayFail) const
 {
     if (m_didAttemptToRun && !m_didRun) {
         Utils::SynchronousProcessResponse response;
@@ -120,9 +129,9 @@ Utils::SynchronousProcessResponse CMakeTool::run(const QString &arg) const
     cmake.setProcessEnvironment(env.toProcessEnvironment());
     cmake.setTimeOutMessageBoxEnabled(false);
 
-    Utils::SynchronousProcessResponse response = cmake.runBlocking(m_executable.toString(), QStringList() << arg);
+    Utils::SynchronousProcessResponse response = cmake.runBlocking(m_executable.toString(), args);
     m_didAttemptToRun = true;
-    m_didRun = (response.result == Utils::SynchronousProcessResponse::Finished);
+    m_didRun = mayFail ? true : (response.result == Utils::SynchronousProcessResponse::Finished);
     return response;
 }
 
@@ -153,38 +162,9 @@ bool CMakeTool::isAutoRun() const
     return m_isAutoRun;
 }
 
-QStringList CMakeTool::supportedGenerators() const
+QList<CMakeTool::Generator> CMakeTool::supportedGenerators() const
 {
-    if (m_generators.isEmpty()) {
-        Utils::SynchronousProcessResponse response = run("--help");
-        if (response.result == Utils::SynchronousProcessResponse::Finished) {
-            bool inGeneratorSection = false;
-            const QStringList lines = response.stdOut().split('\n');
-            foreach (const QString &line, lines) {
-                if (line.isEmpty())
-                    continue;
-                if (line == "Generators") {
-                    inGeneratorSection = true;
-                    continue;
-                }
-                if (!inGeneratorSection)
-                    continue;
-
-                if (line.startsWith("  ") && line.at(3) != ' ') {
-                    int pos = line.indexOf('=');
-                    if (pos < 0)
-                        pos = line.length();
-                    if (pos >= 0) {
-                        --pos;
-                        while (pos > 2 && line.at(pos).isSpace())
-                            --pos;
-                    }
-                    if (pos > 2)
-                        m_generators.append(line.mid(2, pos - 1));
-                }
-            }
-        }
-    }
+    readInformation(QueryType::GENERATORS);
     return m_generators;
 }
 
@@ -192,19 +172,19 @@ TextEditor::Keywords CMakeTool::keywords()
 {
     if (m_functions.isEmpty()) {
         Utils::SynchronousProcessResponse response;
-        response = run("--help-command-list");
+        response = run({ "--help-command-list" });
         if (response.result == Utils::SynchronousProcessResponse::Finished)
             m_functions = response.stdOut().split('\n');
 
-        response = run("--help-commands");
+        response = run({ "--help-commands" });
         if (response.result == Utils::SynchronousProcessResponse::Finished)
             parseFunctionDetailsOutput(response.stdOut());
 
-        response = run("--help-property-list");
+        response = run({ "--help-property-list" });
         if (response.result == Utils::SynchronousProcessResponse::Finished)
             m_variables = parseVariableOutput(response.stdOut());
 
-        response = run("--help-variable-list");
+        response = run({ "--help-variable-list" });
         if (response.result == Utils::SynchronousProcessResponse::Finished) {
             m_variables.append(parseVariableOutput(response.stdOut()));
             m_variables = Utils::filteredUnique(m_variables);
@@ -213,6 +193,18 @@ TextEditor::Keywords CMakeTool::keywords()
     }
 
     return TextEditor::Keywords(m_variables, m_functions, m_functionArgs);
+}
+
+bool CMakeTool::hasServerMode() const
+{
+    readInformation(QueryType::SERVER_MODE);
+    return m_hasServerMode;
+}
+
+CMakeTool::Version CMakeTool::version() const
+{
+    readInformation(QueryType::VERSION);
+    return m_version;
 }
 
 bool CMakeTool::isAutoDetected() const
@@ -241,6 +233,32 @@ QString CMakeTool::mapAllPaths(const ProjectExplorer::Kit *kit, const QString &i
     if (m_pathMapper)
         return m_pathMapper(kit, in);
     return in;
+}
+
+void CMakeTool::readInformation(CMakeTool::QueryType type) const
+{
+    if ((type == QueryType::GENERATORS && !m_generators.isEmpty())
+         || (type == QueryType::SERVER_MODE && m_queriedServerMode)
+         || (type == QueryType::VERSION && !m_version.fullVersion.isEmpty()))
+        return;
+
+    if (!m_triedCapabilities) {
+        fetchFromCapabilities();
+        m_triedCapabilities = true;
+        m_queriedServerMode = true; // Got added after "-E capabilities" support!
+        if (type == QueryType::GENERATORS && !m_generators.isEmpty())
+            return;
+    }
+
+    if (type == QueryType::GENERATORS) {
+        fetchGeneratorsFromHelp();
+    } else if (type == QueryType::SERVER_MODE) {
+        // Nothing to do...
+    } else if (type == QueryType::VERSION) {
+        fetchVersionFromVersionOutput();
+    } else {
+        QTC_ASSERT(false, return);
+    }
 }
 
 static QStringList parseDefinition(const QString &definition)
@@ -332,6 +350,107 @@ QStringList CMakeTool::parseVariableOutput(const QString &output)
         }
     }
     return result;
+}
+
+void CMakeTool::fetchGeneratorsFromHelp() const
+{
+    Utils::SynchronousProcessResponse response = run({ "--help" });
+    if (response.result != Utils::SynchronousProcessResponse::Finished)
+        return;
+
+    bool inGeneratorSection = false;
+    QHash<QString, QStringList> generatorInfo;
+    const QStringList lines = response.stdOut().split('\n');
+    foreach (const QString &line, lines) {
+        if (line.isEmpty())
+            continue;
+        if (line == "Generators") {
+            inGeneratorSection = true;
+            continue;
+        }
+        if (!inGeneratorSection)
+            continue;
+
+        if (line.startsWith("  ") && line.at(3) != ' ') {
+            int pos = line.indexOf('=');
+            if (pos < 0)
+                pos = line.length();
+            if (pos >= 0) {
+                --pos;
+                while (pos > 2 && line.at(pos).isSpace())
+                    --pos;
+            }
+            if (pos > 2) {
+                const QString fullName = line.mid(2, pos - 1);
+                const int dashPos = fullName.indexOf(" - ");
+                QString generator;
+                QString extra;
+                if (dashPos < 0) {
+                    generator = fullName;
+                } else {
+                    extra = fullName.mid(0, dashPos);
+                    generator = fullName.mid(dashPos + 3);
+                }
+                QStringList value = generatorInfo.value(generator);
+                if (!extra.isEmpty())
+                    value.append(extra);
+                generatorInfo.insert(generator, value);
+            }
+        }
+    }
+
+    // Populate genertor list:
+    for (auto it = generatorInfo.constBegin(); it != generatorInfo.constEnd(); ++it)
+        m_generators.append(Generator(it.key(), it.value()));
+}
+
+void CMakeTool::fetchVersionFromVersionOutput() const
+{
+    Utils::SynchronousProcessResponse response = run({ "--version" });
+    if (response.result != Utils::SynchronousProcessResponse::Finished)
+        return;
+
+    QRegularExpression versionLine("^cmake version ((\\d+).(\\d+).(\\d+).*)$");
+    const QString responseText = response.stdOut();
+    for (const QStringRef &line : responseText.splitRef(QLatin1Char('\n'))) {
+        QRegularExpressionMatch match = versionLine.match(line);
+        if (!match.hasMatch())
+            continue;
+
+        m_version.major = match.captured(2).toInt();
+        m_version.minor = match.captured(3).toInt();
+        m_version.patch = match.captured(4).toInt();
+        m_version.fullVersion = match.captured(1).toUtf8();
+        break;
+    }
+}
+
+void CMakeTool::fetchFromCapabilities() const
+{
+    Utils::SynchronousProcessResponse response = run({ "-E", "capabilities" }, true);
+    if (response.result != Utils::SynchronousProcessResponse::Finished)
+        return;
+
+    auto doc = QJsonDocument::fromJson(response.stdOut().toUtf8());
+    if (!doc.isObject())
+        return;
+
+    const QVariantMap data = doc.object().toVariantMap();
+    m_hasServerMode = data.value("serverMode").toBool();
+    const QVariantList generatorList = data.value("generators").toList();
+    for (const QVariant &v : generatorList) {
+        const QVariantMap gen = v.toMap();
+        m_generators.append(Generator(gen.value("name").toString(),
+                                      gen.value("extraGenerators").toStringList(),
+                                      gen.value("platformSupport").toBool(),
+                                      gen.value("toolsetSupport").toBool()));
+    }
+
+    const QVariantMap versionInfo = data.value("version").toMap();
+    m_version.major = versionInfo.value("major").toInt();
+    m_version.minor = versionInfo.value("minor").toInt();
+    m_version.patch = versionInfo.value("patch").toInt();
+    m_version.fullVersion = versionInfo.value("string").toByteArray();
 }
 
 } // namespace CMakeProjectManager

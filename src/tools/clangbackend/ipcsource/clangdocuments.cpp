@@ -33,6 +33,8 @@
 #include <skippedsourceranges.h>
 #include <unsavedfiles.h>
 
+#include <utils/algorithm.h>
+
 #include <QDebug>
 
 #include <algorithm>
@@ -62,20 +64,30 @@ std::vector<Document> Documents::create(const QVector<FileContainer> &fileContai
 
     std::vector<Document> createdDocuments;
 
-    for (const FileContainer &fileContainer : fileContainers)
+    for (const FileContainer &fileContainer : fileContainers) {
+        if (fileContainer.hasUnsavedFileContent())
+            updateDocumentsWithChangedDependency(fileContainer.filePath());
+
         createdDocuments.push_back(createDocument(fileContainer));
+    }
 
     return createdDocuments;
 }
 
-void Documents::update(const QVector<FileContainer> &fileContainers)
+std::vector<Document> Documents::update(const QVector<FileContainer> &fileContainers)
 {
     checkIfDocumentsForFilePathsExist(fileContainers);
 
+    std::vector<Document> createdDocuments;
+
     for (const FileContainer &fileContainer : fileContainers) {
-        updateDocument(fileContainer);
+        const std::vector<Document> documents = updateDocument(fileContainer);
+        createdDocuments.insert(createdDocuments.end(), documents.begin(), documents.end());
+
         updateDocumentsWithChangedDependency(fileContainer.filePath());
     }
+
+    return createdDocuments;
 }
 
 static bool removeFromFileContainer(QVector<FileContainer> &fileContainers, const Document &document)
@@ -135,6 +147,20 @@ bool Documents::hasDocument(const Utf8String &filePath,
 const std::vector<Document> &Documents::documents() const
 {
     return documents_;
+}
+
+const std::vector<Document> Documents::filtered(const IsMatchingDocument &isMatchingDocument) const
+{
+    return Utils::filtered(documents_, isMatchingDocument);
+}
+
+std::vector<Document> Documents::dirtyAndVisibleButNotCurrentDocuments() const
+{
+    return filtered([](const Document &document) {
+        return document.isNeedingReparse()
+            && document.isVisibleInEditor()
+            && !document.isUsedByCurrentEditor();
+    });
 }
 
 UnsavedFiles Documents::unsavedFiles() const
@@ -205,12 +231,14 @@ Document Documents::createDocument(const FileContainer &fileContainer)
     return documents_.back();
 }
 
-void Documents::updateDocument(const FileContainer &fileContainer)
+std::vector<Document> Documents::updateDocument(const FileContainer &fileContainer)
 {
     const auto documents = findAllDocumentsWithFilePath(fileContainer.filePath());
 
     for (auto document : documents)
         document.setDocumentRevision(fileContainer.documentRevision());
+
+    return documents;
 }
 
 std::vector<Document>::iterator Documents::findDocument(const FileContainer &fileContainer)

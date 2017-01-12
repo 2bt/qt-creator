@@ -966,6 +966,8 @@ void GdbEngine::runCommand(const DebuggerCommand &command)
             Q_ARG(QString, buffer));
     } else {
         write(cmd.function.toUtf8() + "\r\n");
+        if (command.flags & NeedsFlush)
+            write("p 0\r\n");
 
         // Start Watchdog.
         if (m_commandTimer.interval() <= 20000)
@@ -1103,6 +1105,8 @@ void GdbEngine::handleResultRecord(DebuggerResponse *response)
                 // the exception now in a box.
                 if (msg.startsWith("During startup program exited with"))
                     notifyInferiorExited();
+                else if (msg.contains("Command aborted."))
+                    notifyInferiorSpontaneousStop();
                 QString logMsg;
                 if (!m_lastWinException.isEmpty())
                     logMsg = m_lastWinException + '\n';
@@ -1687,9 +1691,6 @@ void GdbEngine::handleShowVersion(const DebuggerResponse &response)
         else
             runCommand({"set target-async off", ConsoleCommand});
 
-        if (runParameters().multiProcess)
-            runCommand({"set detach-on-fork off", ConsoleCommand});
-
         //runCommand("set build-id-verbose 2", ConsoleCommand);
     }
 }
@@ -2012,7 +2013,7 @@ void GdbEngine::continueInferiorInternal()
         cmd.callback = CB(handleExecuteContinue);
         runCommand(cmd);
     } else {
-        DebuggerCommand cmd("-exec-continue", RunRequest);
+        DebuggerCommand cmd("-exec-continue", RunRequest|NeedsFlush);
         cmd.callback = CB(handleExecuteContinue);
         runCommand(cmd);
     }
@@ -2037,7 +2038,7 @@ void GdbEngine::executeStep()
         runCommand(cmd);
     } else {
         DebuggerCommand cmd;
-        cmd.flags = RunRequest;
+        cmd.flags = RunRequest|NeedsFlush;
         cmd.function = QLatin1String(isReverseDebugging() ? "reverse-step" : "-exec-step");
         cmd.callback = CB(handleExecuteStep);
         runCommand(cmd);
@@ -2087,7 +2088,7 @@ void GdbEngine::executeStepI()
     notifyInferiorRunRequested();
     showStatusMessage(tr("Step by instruction requested..."), 5000);
     DebuggerCommand cmd;
-    cmd.flags = RunRequest;
+    cmd.flags = RunRequest|NeedsFlush;
     cmd.function = QLatin1String(isReverseDebugging() ? "reverse-stepi" : "-exec-step-instruction");
     cmd.callback = CB(handleExecuteContinue);
     runCommand(cmd);
@@ -2103,12 +2104,11 @@ void GdbEngine::executeStepOut()
     if (isNativeMixedActiveFrame()) {
         runCommand({"executeStepOut", RunRequest|PythonCommand});
     } else {
-        runCommand({"-exec-finish", RunRequest, CB(handleExecuteContinue)});
         // -exec-finish in 'main' results (correctly) in
         //  40^error,msg="\"finish\" not meaningful in the outermost frame."
         // However, this message does not seem to get flushed before
         // anything else happen - i.e. "never". Force some extra output.
-        runCommand({"print 32"});
+        runCommand({"-exec-finish", RunRequest|NeedsFlush, CB(handleExecuteContinue)});
     }
 }
 
@@ -3203,85 +3203,13 @@ void GdbEngine::reloadFullStack()
     runCommand(cmd);
 }
 
-static QString msgCannotLoadQmlStack(const QString &why)
-{
-    return "Unable to load QML stack: " + why;
-}
-
-static quint64 findJsExecutionContextAddress(const GdbMi &stackArgsResponse, const QString &qtNamespace)
-{
-    const GdbMi frameList = stackArgsResponse.childAt(0);
-    if (!frameList.childCount())
-        return 0;
-    QString jsExecutionContextType = qtNamespace;
-    if (!jsExecutionContextType.isEmpty())
-        jsExecutionContextType.append("::");
-    jsExecutionContextType.append("QV4::ExecutionContext *");
-    foreach (const GdbMi &frameNode, frameList.children()) {
-        foreach (const GdbMi &argNode, frameNode["args"].children()) {
-            if (argNode["type"].data() == jsExecutionContextType) {
-                bool ok;
-                const quint64 address = argNode["value"].data().toULongLong(&ok, 16);
-                if (ok && address)
-                    return address;
-            }
-        }
-    }
-    return 0;
-}
-
 void GdbEngine::loadAdditionalQmlStack()
 {
-    // Scan for QV4::ExecutionContext parameter in the parameter list of a V4 call.
-    DebuggerCommand cmd("-stack-list-arguments --simple-values", NeedsStop);
-    cmd.callback = [this](const DebuggerResponse &response) {
-        if (!response.data.isValid()) {
-            showMessage(msgCannotLoadQmlStack("No stack obtained."), LogError);
-            return;
-        }
-        const quint64 contextAddress = findJsExecutionContextAddress(response.data, qtNamespace());
-        if (!contextAddress) {
-            showMessage(msgCannotLoadQmlStack("The address of the JS execution context could not be found."), LogError);
-            return;
-        }
-        // Call the debug function of QML with the context address to obtain the QML stack trace.
-        DebuggerCommand cmd;
-        cmd.function = "-data-evaluate-expression \"qt_v4StackTrace((QV4::ExecutionContext *)0x"
-                            + QString::number(contextAddress, 16) + ")\"";
-        cmd.callback = CB(handleQmlStackTrace);
-        runCommand(cmd);
-    };
+    DebuggerCommand cmd = stackCommand(-1);
+    cmd.arg("extraqml", "1");
+    cmd.callback = [this](const DebuggerResponse &r) { handleStackListFrames(r, true); };
+    cmd.flags = Discardable | PythonCommand;
     runCommand(cmd);
-}
-
-// Scan the arguments of a stack list for the address of a QV4::ExecutionContext.
-void GdbEngine::handleQmlStackTrace(const DebuggerResponse &response)
-{
-    if (!response.data.isValid()) {
-        showMessage(msgCannotLoadQmlStack("No result obtained."), LogError);
-        return;
-    }
-    // Prepend QML stack frames to existing C++ stack frames.
-    QString stackData = response.data["value"].data();
-    const int index = stackData.indexOf("stack=");
-    if (index == -1) {
-        showMessage(msgCannotLoadQmlStack("Malformed result."), LogError);
-        return;
-    }
-    stackData.remove(0, index);
-    stackData.replace("\\\"", "\"");
-    GdbMi stackMi;
-    stackMi.fromString(stackData);
-    const int qmlFrameCount = stackMi.childCount();
-    if (!qmlFrameCount) {
-        showMessage(msgCannotLoadQmlStack("No stack frames obtained."), LogError);
-        return;
-    }
-    QList<StackFrame> qmlFrames;
-    qmlFrames.reserve(qmlFrameCount);
-    for (int i = 0; i < qmlFrameCount; ++i)
-        qmlFrames.append(StackFrame::parseFrame(stackMi.childAt(i), runParameters()));
-    stackHandler()->prependFrames(qmlFrames);
 }
 
 DebuggerCommand GdbEngine::stackCommand(int depth)
@@ -3587,14 +3515,14 @@ void GdbEngine::handleRegisterListing(const DebuggerResponse &response)
     m_registers.clear();
     QStringList lines = response.consoleStreamOutput.split('\n');
     for (int i = 1; i < lines.size(); ++i) {
-        QStringList parts = QString(lines.at(i)).split(' ', QString::SkipEmptyParts);
+        const QVector<QStringRef> parts = lines.at(i).splitRef(' ', QString::SkipEmptyParts);
         if (parts.size() < 7)
             continue;
         int gdbRegisterNumber = parts.at(1).toInt();
         Register reg;
-        reg.name = parts.at(0);
+        reg.name = parts.at(0).toString();
         reg.size = parts.at(4).toInt();
-        reg.reportedType = parts.at(5);
+        reg.reportedType = parts.at(5).toString();
         m_registers[gdbRegisterNumber] = reg;
     }
 }
@@ -3967,7 +3895,7 @@ static SourcePathMap mergeStartParametersSourcePathMap(const DebuggerRunParamete
 void GdbEngine::startGdb(const QStringList &args)
 {
     const QString tests = QString::fromLocal8Bit(qgetenv("QTC_DEBUGGER_TESTS"));
-    foreach (const QString &test, tests.split(','))
+    foreach (const QStringRef &test, tests.splitRef(QLatin1Char(',')))
         m_testCases.insert(test.toInt());
     foreach (int test, m_testCases)
         showMessage("ENABLING TEST CASE: " + QString::number(test));
@@ -4119,7 +4047,7 @@ void GdbEngine::startGdb(const QStringList &args)
         runCommand({"set auto-solib-add on", ConsoleCommand});
     }
 
-    if (boolSetting(MultiInferior)) {
+    if (boolSetting(MultiInferior) || runParameters().multiProcess) {
         //runCommand("set follow-exec-mode new");
         runCommand({"set detach-on-fork off"});
     }
@@ -4208,7 +4136,9 @@ void GdbEngine::handleGdbError(QProcess::ProcessError error)
         // This should be handled by the code trying to start the process.
         break;
     case QProcess::Crashed:
-        // This will get a processExited() as well.
+        // This does not seem to get processFinished() in all cases.
+        m_gdbProc.disconnect();
+        handleGdbFinished(m_gdbProc.exitCode(), QProcess::CrashExit);
         break;
     case QProcess::ReadError:
     case QProcess::WriteError:
@@ -4565,7 +4495,7 @@ void GdbEngine::doUpdateLocals(const UpdateParameters &params)
 {
     m_pendingBreakpointRequests = 0;
 
-    watchHandler()->notifyUpdateStarted(params.partialVariables());
+    watchHandler()->notifyUpdateStarted(params);
 
     DebuggerCommand cmd("fetchVariables", Discardable|InUpdateLocals|PythonCommand);
     watchHandler()->appendFormatRequests(&cmd);

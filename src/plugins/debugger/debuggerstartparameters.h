@@ -84,6 +84,7 @@ public:
     QString remoteChannel;
     QSsh::SshConnectionParameters connParams;
     bool remoteSetupNeeded = false;
+    bool useExtendedRemote = false; // Whether to use GDB's target extended-remote or not.
     QString symbolFile;
 
     // Used by Mer plugin (3rd party)
@@ -110,6 +111,9 @@ public:
     QString deviceSymbolsRoot;
     bool continueAfterAttach = false;
     QString sysRoot;
+
+    // Used by general core file debugging. Public access requested in QTCREATORBUG-17158.
+    QString coreFile;
 };
 
 } // namespace Debugger

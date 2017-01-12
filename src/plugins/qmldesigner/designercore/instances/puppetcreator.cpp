@@ -45,6 +45,7 @@
 #include <qtsupport/qtsupportconstants.h>
 #include <coreplugin/icore.h>
 
+#include <utils/algorithm.h>
 #include <utils/environment.h>
 #include <utils/hostosinfo.h>
 
@@ -133,10 +134,10 @@ PuppetCreator::PuppetCreator(ProjectExplorer::Kit *kit,
     ,m_kit(kit)
     ,m_availablePuppetType(FallbackPuppet)
     ,m_model(model)
-    ,m_currentProject(project)
 #ifndef QMLDESIGNER_TEST
       ,m_designerSettings(QmlDesignerPlugin::instance()->settings())
 #endif
+    ,m_currentProject(project)
 {
 }
 
@@ -363,6 +364,14 @@ QString PuppetCreator::qml2PuppetPath(PuppetType puppetType) const
     return qmlPuppetDirectory(puppetType) + QStringLiteral("/qml2puppet") + QStringLiteral(QTC_HOST_EXE_SUFFIX);
 }
 
+static void filterOutQtBaseImportPath(QStringList *stringList)
+{
+    Utils::erase(*stringList, [](const QString &string) {
+        QDir dir(string);
+        return dir.dirName() == "qml" && !dir.entryInfoList(QStringList("QtQuick.2"), QDir::Dirs).isEmpty();
+    });
+}
+
 QProcessEnvironment PuppetCreator::processEnvironment() const
 {
     static const QString pathSep = Utils::HostOsInfo::pathListSeparator();
@@ -372,6 +381,8 @@ QProcessEnvironment PuppetCreator::processEnvironment() const
     environment.set(QLatin1String("QML_BAD_GUI_RENDER_LOOP"), QLatin1String("true"));
     environment.set(QLatin1String("QML_USE_MOCKUPS"), QLatin1String("true"));
     environment.set(QLatin1String("QML_PUPPET_MODE"), QLatin1String("true"));
+    environment.set(QLatin1String("QML_DISABLE_DISK_CACHE"), QLatin1String("true"));
+    environment.set(QLatin1String("QT_AUTO_SCREEN_SCALE_FACTOR"), QLatin1String("1"));
 
 #ifndef QMLDESIGNER_TEST
     const QString controlsStyle = m_designerSettings.value(DesignerSettingsKey::
@@ -391,6 +402,9 @@ QProcessEnvironment PuppetCreator::processEnvironment() const
 
     QStringList importPaths = m_model->importPaths();
 
+    /* For the fallback puppet we have to remove the path to the original qtbase plugins to avoid conflics */
+    if (m_availablePuppetType == FallbackPuppet)
+        filterOutQtBaseImportPath(&importPaths);
 
     if (m_currentProject) {
         for (const QString &fileName : m_currentProject->files(ProjectExplorer::Project::SourceFiles)) {
@@ -406,9 +420,9 @@ QProcessEnvironment PuppetCreator::processEnvironment() const
     }
 
     if (m_availablePuppetType == FallbackPuppet)
-        importPaths.append(QLibraryInfo::location(QLibraryInfo::Qml2ImportsPath));
-    if (m_availablePuppetType != FallbackPuppet)
-        environment.appendOrSet("QML2_IMPORT_PATH", importPaths.join(pathSep), pathSep);
+        importPaths.prepend(QLibraryInfo::location(QLibraryInfo::Qml2ImportsPath));
+
+    environment.appendOrSet("QML2_IMPORT_PATH", importPaths.join(pathSep), pathSep);
 
     qCInfo(puppetStart) << Q_FUNC_INFO;
     qCInfo(puppetStart) << "Puppet qrc mapping" << m_qrcMapping;
