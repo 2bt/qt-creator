@@ -66,6 +66,7 @@ const char *nameForStyle(TextStyle style)
     case C_PREPROCESSOR:        return "Preprocessor";
     case C_LABEL:               return "Label";
     case C_COMMENT:             return "Comment";
+    case C_TODO_COMMENT:        return "TODO.Comment";
     case C_DOXYGEN_COMMENT:     return "Doxygen.Comment";
     case C_DOXYGEN_TAG:         return "Doxygen.Tag";
     case C_VISUAL_WHITESPACE:   return "VisualWhitespace";
