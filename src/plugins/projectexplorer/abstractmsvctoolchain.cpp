@@ -30,10 +30,12 @@
 #include <projectexplorer/projectexplorer.h>
 #include <projectexplorer/projectexplorersettings.h>
 
+#include <utils/hostosinfo.h>
 #include <utils/qtcprocess.h>
 #include <utils/synchronousprocess.h>
 
 #include <QDir>
+#include <QSysInfo>
 #include <QTemporaryFile>
 #include <QTextCodec>
 
@@ -271,7 +273,8 @@ bool AbstractMsvcToolChain::generateEnvironmentSettings(Utils::Environment &env,
         call += ' ';
         call += batchArgs.toLocal8Bit();
     }
-    saver.write("chcp 65001\r\n");
+    if (Utils::HostOsInfo::isWindowsHost() && QSysInfo::WindowsVersion >= QSysInfo::WV_WINDOWS7)
+        saver.write("chcp 65001\r\n"); // Only works for Windows 7 or later
     saver.write(call + "\r\n");
     saver.write("@echo " + marker.toLocal8Bit() + "\r\n");
     saver.write("set\r\n");
@@ -287,7 +290,7 @@ bool AbstractMsvcToolChain::generateEnvironmentSettings(Utils::Environment &env,
     // if Creator is launched within a session set up by setenv.cmd.
     env.unset(QLatin1String("ORIGINALPATH"));
     run.setEnvironment(env.toStringList());
-    run.setTimeoutS(10);
+    run.setTimeoutS(30);
     Utils::FileName cmdPath = Utils::FileName::fromUserInput(QString::fromLocal8Bit(qgetenv("COMSPEC")));
     if (cmdPath.isEmpty())
         cmdPath = env.searchInPath(QLatin1String("cmd.exe"));

@@ -447,7 +447,7 @@ public:
         });
 
         QMenu *copyMenu = menu->addMenu(tr("Copy Steps From Other Kit..."));
-        if (m_kitId.isValid()) {
+        if (m_kitId.isValid() && m_project->target(m_kitId)) {
             const QList<Kit *> kits = KitManager::kits();
             for (Kit *kit : kits) {
                 QAction *copyAction = copyMenu->addAction(kit->displayName());
@@ -726,6 +726,10 @@ TargetGroupItemPrivate::TargetGroupItemPrivate(TargetGroupItem *q, Project *proj
 TargetGroupItemPrivate::~TargetGroupItemPrivate()
 {
     disconnect();
+
+    delete m_noKitLabel;
+    delete m_configurePage;
+    delete m_configuredPage;
 }
 
 QVariant TargetGroupItem::data(int column, int role) const
